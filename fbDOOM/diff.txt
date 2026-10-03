@@ -1,0 +1,22 @@
+Patched files:
+
+fbdoom/Makefile: Adds the ShoreTel sound module and changes linker flags.
+fbdoom/i_input_tty.c: Replaces input handling with USB gamepad controls and fire-button LED feedback.
+fbdoom/i_sound.c: Adds ShoreTel sound support and physical volume-button handling. Disables music modules.
+fbdoom/i_video_fbdev.c: Replaces centered integer scaling with full-screen scaling using 32-bit pixels.
+fbdoom/m_config.c: Changes the configuration location from /mnt to /tmp.
+fbdoom/p_inter.c: Triggers LED feedback when the player takes damage.
+fbdoom/st_stuff.c: Adds red LED flashes for damage and green LED flashes for pickups.
+sndserv/linux.c: Replaces OSS audio output with ShoreTel HALAUDIO output.
+sndserv/soundsrv.c: Adds the string.h include.
+
+Added files:
+fbdoom/i_shoretel_sndserv.c
+sndserv/i_shoretel_sndserv.c
+sndserv/linux_old.c
+sndserv/linux_shoretel.c
+sndserv/linux/sndserver
+sndserv/linux/soundsrv.o
+sndserv/linux/sounds.o
+sndserv/linux/wadread.o
+sndserv/linux/linux.o
