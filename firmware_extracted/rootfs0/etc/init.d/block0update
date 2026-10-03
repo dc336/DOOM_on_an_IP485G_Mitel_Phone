@@ -1,0 +1,94 @@
+#!/bin/ash
+#
+# validate and update boot0
+block0update_unnecessary() {
+ logger -t bootupdate "unnecessary: have ${have}, file ${file}"
+ rm /etc/init.d/block0update
+}
+
+block0update_necessary() {
+ # capture current block0
+ dd if=/dev/mtd0 ibs=2048 of=/tmp/$$-block0 count=64
+ # erase current boot2
+ dd if=/dev/zero bs=1 of=/tmp/$$-block0 seek=${have2Origin} count=${have2Size} conv=notrunc
+ # replace boot2
+ dd if=/boot/boot2.boot_img bs=1 of=/tmp/$$-block0 seek=${have2Origin} count=${file2Size} conv=notrunc
+
+ logger -t block0update 'rewriting block0!'
+ # erase block zero
+ flash_eraseall /dev/mtd0
+ # write block zero
+ nandwrite /dev/mtd0 /tmp/$$-block0
+ logger -t block0update 'block0 rewritten, rebooting to pick up new /proc/manuf/ entries'
+ rm /etc/init.d/block0update
+ sleep 4
+ reboot
+}
+
+if [ "$1" == "start" ]; then
+ # sanity
+ file2Size=`stat -c %s /boot/boot2.boot_img`
+ if [ -z "${file2Size}" ]; then
+  logger -t block0update 'abandoned without /boot/boot2.boot_img'
+ else
+  have2Origin=`cat /proc/manuf/boot2Origin`
+  if [ -z "${have2Origin}" ]; then
+   logger -t block0update 'abandoned without /proc/manuf/boot2Origin'
+  else
+   have2Size=`cat /proc/manuf/boot2Size`
+   if [ -z "${have2Size}" ]; then
+    logger -t block0update 'abandoned without /proc/manuf/boot2Size'
+   else
+    # quick check for equality
+    have2=`cat /proc/manuf/boot2Version`
+    have2=${have2:-0.0.0.0}
+    file2=`strings /boot/boot2.boot_img | sed -n -e 's;@#()BOOT2:\(.*\);\1;p'`
+    if [ "${have2}" == "${file2}" ]; then
+     logger -t block0update "unnecessary: already ${file2}"
+     rm /etc/init.d/block0update
+    else
+     # break down each version w.x.y.z
+     hw=${have2%%.*}
+     have2=${have2#*.}
+     hx=${have2%%.*}
+     have2=${have2#*.}
+     hy=${have2%%.*}
+     have2=${have2#*.}
+     hz=${have2%% *}
+     have2=${have2#* }
+     fw=${file2%%.*}
+     file2=${file2#*.}
+     fx=${file2%%.*}
+     file2=${file2#*.}
+     fy=${file2%%.*}
+     file2=${file2#*.}
+     fz=${file2%% *}
+     file2=${file2#* }
+     if [ ${hw} -gt ${fw} ]; then
+      block0update_unnecessary
+     elif [ ${hw} -lt ${fw} ]; then
+      block0update_necessary
+     else # ${hw} -eq ${fw}
+      if [ ${hx} -gt ${fx} ]; then
+       block0update_unnecessary
+      elif [ ${hx} -lt ${fx} ]; then
+       block0update_necessary
+      else # ${hx} -eq ${fx}
+       if [ ${hy} -gt ${fy} ]; then
+        block0update_unnecessary
+       elif [ ${hy} -lt ${fy} ]; then
+        block0update_necessary
+       else # ${hy} -eq ${fy}
+        if [ ${hz} -gt ${fz} ]; then
+         block0update_unnecessary
+        else # either less, or equal with date mismatch
+         block0update_necessary
+        fi
+       fi
+      fi
+     fi
+    fi
+   fi
+  fi
+ fi
+fi

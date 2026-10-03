@@ -1,0 +1,49 @@
+#!/bin/ash
+usage () {
+ echo 'Usage: ftkbdiag [on|off]'
+ echo Failure
+ exit 1
+}
+checkresult () {
+ RESULT=$?
+ if [ ${RESULT} != 0 ]; then
+  echo Failure
+  exit ${RESULT}
+ fi
+}
+if [ $# != 1 ]; then
+ usage
+fi
+case $1 in
+ off|0)
+  CONSOLE_ORIGLEVEL=`cat /tmp/ftkbdiag.console_loglevel 2>/dev/null`
+  CONSOLE_LOGLEVEL=${CONSOLE_ORIGLEVEL:-4}
+  rm -f /tmp/ftkbdiag.console_loglevel
+  DEBUG=0
+  ;;
+ on|1)
+  if ! [ -s /tmp/ftkbdiag.console_loglevel ]; then
+   sed -e 's;^\([0-9]*\).*;\1;' /proc/sys/kernel/printk >/tmp/ftkbdiag.console_loglevel 
+  fi
+  CONSOLE_LOGLEVEL=7
+  DEBUG=1
+  ;;
+ *)
+  usage
+  ;;
+esac
+echo "echo ${CONSOLE_LOGLEVEL} >/proc/sys/kernel/printk"
+echo ${CONSOLE_LOGLEVEL} >/proc/sys/kernel/printk
+checkresult
+echo "echo ${DEBUG} >/proc/keypad/debug"
+usleep 10000
+echo ${DEBUG} >/proc/keypad/debug
+checkresult
+usleep 50000
+if tty | grep -q ttyAMA; then
+ echo Success
+else
+ echo ftkbdiag emits key events only over the serial console and to /var/log/messages
+ echo Warning
+fi
+exit 0

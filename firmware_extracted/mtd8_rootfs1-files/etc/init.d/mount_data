@@ -1,0 +1,42 @@
+#!/bin/ash
+#
+# mount_data to mount read-write(/data) ubifs,
+# rebuild /etc/issue from ctrl partition
+# split from union_pivot to help linearize progress bar
+#
+# uses ${bootbank} & ${ctrlmntn} from invoker, if available
+#
+
+case "$1" in
+ start|"")
+  mount -t ubifs ubi0:data /data
+  chmod 777 /data
+  # from invoker, if available...
+  [ "${bootbank}" ] || bootbank=`sed -e 's;.*(rootfs\(.\)).*;\1;' /proc/cmdline`
+  [ "${ctrlmtdn}" ] || ctrlmtdn=`sed -n -e "s;mtd\([0-9]*\):.*\"ctrl${bootbank}\";\1;p" /proc/mtd`
+  # pull update date & build tag from ctrl
+  updatedate="`sed -n -e '1s;^\(....-..-..\)-\(..\)-\(..\)-\(..\).*;\1 \2:\3:\4;p' /dev/mtd${ctrlmtdn}`"
+  buildtag="`sed -n -e '7p' /dev/mtd${ctrlmtdn}`"
+  # Delete any core file if exists; and create a core directory (to prevent creation of core file)
+  if [ ! -d /data/core ]; then
+   rm -f /data/core
+   mkdir /data/core
+  fi
+  rm -f /data/reserved
+  # reconstruct /data/etc/issue
+  rm -f /data/etc/issue
+  mkdir -p /data/etc
+  echo "${buildtag} `cat /proc/manuf/serialNumber`" >/data/etc/issue
+  [ "${updatedate}" ] && touch -d "${updatedate}" /data/etc/issue
+  ;;
+
+ stop)
+  # don't try to umount after pivot_root
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+
+esac

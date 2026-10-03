@@ -1,0 +1,60 @@
+#!/bin/ash
+#
+# factory_load -- flesh out rootfs-only image
+
+model=`cat /proc/manuf/model`
+if ! [ "$model" ]; then
+ logger -s -t factory_load -p info 'no /proc/manuf/model'
+ exit 0
+fi
+# check for more than rootfs, and quietly exit if they exist
+if [ `df | grep -v -E ' (/|/data|/dev/shm|/var/tmp)$' | grep ' 100% ' | wc -l` -gt 1 ]; then exit 0; fi
+# check for configured server
+ftpservers=`sed -n -e 's;^lease\.option156\.ftpServers=\(.*\);\1;p' /nvdata/netcache 2>/dev/null`
+if [ ! "$ftpservers" ]; then
+ logger -s -t factory_load -p info 'no ftpservers'
+ exit 0
+fi
+# look on server for recommended version
+for ftpserver in $ftpservers; do
+ recommended=`wget -q -O - http://$ftpserver/ftproot/version.txt | sed -n -e "s;^Recommended_$model:\([0-9.]*\)\;.*;\1;p"`
+ if [ "$recommended" ]; then break; fi
+done
+if ! [ "$recommended" ]; then
+ logger -s -t factory_load -p info 'no recommended version'
+ exit 0
+fi
+logger -s -t factory_load -p info 'taking action'
+# shut down watchdog
+while ! watchdog -D /dev/watchdog 2>/dev/null; do
+ echo -n .
+ usleep 250000
+done
+echo Watchdog Disabled
+# download recommended version
+update-stage $recommended $ftpserver
+if [ $? -ne 0 ]; then exit 0; fi
+# self-destruct the current bank
+# create ubi number to name file
+rm -f /tmp/$$-ubi_n
+for voln in `/usr/sbin/mtd-utils/ubinfo /dev/ubi0 | sed -n -e 's;^Present volumes: *\(.*\)$;\1;p' | tr -d ,`; do
+ /usr/sbin/mtd-utils/ubinfo /dev/ubi0_$voln | sed -n -e "s;^Name: *\(.*\);$voln \1;p" >>/tmp/$$-ubi_n
+done
+currbank=`sed -n -e 's;.*rootfs\([01]\).*;\1;p' /proc/cmdline`
+# delete existing bank ctrl partition
+voln=`sed -n -e "s;\([0-9]*\) ctrl$currbank\$;\1;p" /tmp/$$-ubi_n`
+if [ "$voln" ]; then
+ logger -s -t factory_load -p info "Deleting ctrl$currbank volume $voln"
+ /usr/sbin/mtd-utils/ubirmvol /dev/ubi0 -n $voln
+ status=$?
+ if [ $status -ne 0 ]; then
+  logger -s -t factory_load -p err "Volume deletion exit status $status, aborting"
+  exit 1
+ fi
+else
+ logger -s -t factory_load -p err "Cannot find ctrl$currbank UBI volume, aborting"
+ exit 1
+fi
+rm -f /tmp/$$-ubi_n
+# update to recommended version
+update-do $recommended

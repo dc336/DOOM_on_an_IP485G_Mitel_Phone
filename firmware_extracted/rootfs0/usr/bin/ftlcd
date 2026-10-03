@@ -1,0 +1,60 @@
+#!/bin/ash
+PRODUCT_UC=$(sed -n -e 's;Product.*: ;;p' /proc/hardware)
+case $PRODUCT_UC in
+ P8CG)
+  # preferred: mentioned during usage...
+  PRIMARY_ARG1='white:0,black:1,red:2,green:3,blue:4,checker:5,hstripe:6,vstripe:7,hgradient:8,vgradient:9,edge:10'
+  # not hinted during usage, but still accepted...
+  SECONDARY_ARG1='solid:0,blank:1'
+  ;;
+ P8|P8G)
+  PRIMARY_ARG1='blank:1,solid:2,vstripeodd:3,vstripeeven:4,hstripeodd:5,hstripeeven:6,checker:7,edge:8,contrast:9,icontrast:10'
+  SECONDARY_ARG1='white:1,black:2'
+  ;;
+ P2|P2G)
+  PRIMARY_ARG1='blank:1,solid:2,vstripe:3,checker:4,hstripe:5,pattern:6,edge:8'
+  SECONDARY_ARG1='white:1,black:2'
+  ;;
+ BB424)
+  # preferred: mentioned during usage...
+  PRIMARY_ARG1='white:0,black:1,red:2,green:3,blue:4,checker:5,hstripe:6,vstripe:7,vgradient:8,hgradient:9,edge:10'
+  # not hinted during usage, but still accepted...
+  SECONDARY_ARG1='solid:0,blank:1'
+  ;;
+ *)
+  echo "Unknown Product ID"
+  exit 1
+  ;;
+esac
+usage () {
+ echo "${PRIMARY_ARG1}" | sed -e 's;[\\<>0-9:];;g' -e 's;,;|;g' -e 's;.*;Usage: ftlcd [&];'
+ echo Failure
+ exit 1
+}
+checkresult () {
+ RESULT=$?
+ if [ ${RESULT} != 0 ]; then
+  echo Failure
+  exit ${RESULT}
+ fi
+}
+if [ $# != 1 ]; then
+ usage
+fi
+if echo "$1" | grep -q '^[0-9][0-9]*$'; then
+ # use numeric argument directly
+ TESTPATTERN=$1
+else
+ # map named argument to pattern number
+ TESTPATTERN=$(echo "${PRIMARY_ARG1},${SECONDARY_ARG1}" | tr , \\n | sed -n -e "s;\<$1:;;p")
+fi
+if [ -z "${TESTPATTERN}" ]; then
+ usage
+fi
+echo "echo ${TESTPATTERN} >/proc/lcd/testPattern"
+usleep 10000
+echo ${TESTPATTERN} >/proc/lcd/testPattern
+checkresult
+usleep 50000
+echo Success
+exit 0

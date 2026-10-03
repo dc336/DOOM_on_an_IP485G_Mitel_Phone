@@ -1,0 +1,86 @@
+#!/bin/sh
+#
+# launch phone application
+
+. /root/.profile
+PHONE_APPLIC=${PHONE_APP}
+
+case "$1" in
+ start|"")
+  # For the phone application
+  [ -s /etc/locale.conf ] || echo LANG=en_US.UTF-8 >/etc/locale.conf
+  export LANG=`sed -n -e 's;^LANG=;;p' /etc/locale.conf`
+  export LD_LIBRARY_PATH=`sed -n -e 's;^Plugins=\(.*\);/\1gfxdrivers;p' /voip/qt.conf`
+  export TZ=`cat /etc/TZ`
+  echo LANG $LANG LD_LIBRARY_PATH $LD_LIBRARY_PATH TZ $TZ
+  if [ -d /proc/lcd ]; then
+   chgrp -R phone /proc/lcd
+   chmod 664 /proc/lcd/*
+  fi
+  # Shut down further console printk (except KERN_EMERG)
+  echo 1 >/proc/sys/kernel/printk
+  # Ensure [kthreadd] avoids priority inversion
+  setsched `ps -o pid,args | grep '\[kthreadd\]' | awk '{print $1}'` 98
+  PHONE_APP_NETWORKING=false        # failure until proven otherwise
+  if [ ! "${PHONE_APPLIC}" ]; then
+   logger -s -t init.d/phone -p err 'Empty ${PHONE_APPLIC} inhibits application launch!'
+  elif ! grep -q -E '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' /proc/manuf/macAddress; then
+   logger -s -t init.d/phone -p err "Missing MAC address inhibits ${PHONE_APPLIC} launch!"
+  elif [ -x /voip/${PHONE_APPLIC} ]; then
+   logger -s -t init.d/phone -p info "Invoking ${PHONE_APPLIC}"
+   nice -n -2 /voip/${PHONE_APPLIC} -qws 2>&1 1>/dev/ttyAMA0 | logger -s -t ${PHONE_APPLIC} &
+   watchdog_timeout=`sed -n -e 's;^watchdogTimeout=\([0-9][0-9]*\)$;\1;p' /nvdata/config/pphone.conf`
+   [ ${watchdog_timeout} -gt 0 ] 2>/dev/null || watchdog_timeout=60
+   echo 'Please press Enter TWICE to activate this console'
+   unset user_enter
+   read -t ${watchdog_timeout} user_enter
+   [ -z "${user_enter+zzz}" ] && { killall -q -0 ${PHONE_APPLIC} || \
+     { logger -s -t init.d/phone -p err "${PHONE_APPLIC} missing after ${watchdog_timeout} seconds, rebooting"; reboot; }; }
+   PHONE_APP_NETWORKING=true
+  fi
+
+  # if phone app did not start, startup networking anyway
+  if ! $PHONE_APP_NETWORKING; then
+   logger -s -t init.d/phone -p err "phone application did not start, starting network"
+   if_setup.sh up
+  fi 
+  ;;
+
+ stop)
+  # kill any phone download mirror
+  killall -q httpd update-mirror
+  # restore robust console printk
+  echo 7 >/proc/sys/kernel/printk
+  # kill any phone application
+  phone_pgids=" `ps -o pgid,comm | sed -n -e "s;^[^0-9]*\([0-9]*\) ${PHONE_APP}.*;\1;p" | sort -u | tr \\\n ' '`"
+  phone_pgids=${phone_pgids% }
+  if [ "${phone_pgids}" ]; then
+   echo "terminate phone group(s)${phone_pgids}"
+   for signal in TERM INT HUP KILL; do
+    kill -${signal} ${phone_pgids// / -}
+    for countdown in 3 2 1; do
+     sleep 1
+     still_pgids=
+     for pgid in ${phone_pgids}; do
+      still_running="`ps -o pgid,comm | sed -n -e "s;^[^0-9]*${pgid} \(.*\);-\1;p" | tr -d \\\n`"
+      if [ "${still_running}" ]; then
+       echo "`echo " ${countdown}:${signal}-${pgid}" | sed -e 's;.*\(..:.*\);\1;'`${still_running}"
+       still_pgids="${still_pgids} ${pgid}"
+      fi
+     done
+     if [ -z "${still_pgids}" ]; then
+      break 2
+     fi
+     phone_pgids=${still_pgids}
+    done
+   done
+  fi
+  # clear the phone display of any remnant phone interface
+  ftlcd blank >/dev/null
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+esac

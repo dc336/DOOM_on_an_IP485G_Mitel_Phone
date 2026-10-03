@@ -1,0 +1,11 @@
+#!/bin/sh
+
+netcat -U /var/run/ipwatchd.socket << EOF
+$1
+$2
+$3
+EOF
+if [ $? -ne 0 ]; then
+    logger -t $0 -p user.error "IPWatch daemon failed to send message"
+fi
+

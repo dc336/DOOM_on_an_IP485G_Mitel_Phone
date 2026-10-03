@@ -1,0 +1,80 @@
+#!/bin/ash
+# ftclean [--reboot] [--keep-logs] [--for-test]
+reboot_method=
+keep_logs=
+for_test=
+while [ $# -gt 0 ]; do
+ case "$1" in
+  "--reboot")    reboot_method=yes; shift ;;
+  "--keep-logs") keep_logs=yes;     shift ;;
+  "--for-test")  for_test=yes;      shift ;;
+  *) echo "Usage ftclean [--reboot] [--keep-logs] [--for-test]"; exit 1 ;;
+ esac
+done
+if [ -z "${reboot_method}" ]; then
+ # ps -o comm truncates the last character of p8cg_phone_debu
+ if ps -o comm | grep -E -s "^${PHONE_APP}(_debug{0,1}){0,1}\$"; then
+  echo "phone is running, --reboot implied"
+  reboot_method=yes
+ elif [ `id -u` -ne 0 ]; then
+  echo "Not root, --reboot implied"
+  reboot_method=yes
+ fi
+fi
+if [ "`tty`" != "not a tty" ]; then
+ echo "This will reset the phone to factory defaults."
+ echo ""
+ read -p "Are you sure you want to do this (yes/NO)? " RESPONSE
+ if [ "${RESPONSE}" != "yes" ]; then
+  echo "Response not \"yes\", abandoning."
+  exit 0
+ fi
+fi
+rm -f /tmp/$$-ftclean-logger
+findnx /data ! -type d > /tmp/$$-ftclean-data
+if [ "${keep_logs}" ]; then
+ echo -n ' --keep-logs' >/tmp/$$-ftclean-logger
+ grep -E -v '^/data/var/log/messages(\.[1-9]){0,1}$' /tmp/$$-ftclean-data >/tmp/$$-keep-logs
+ mv /tmp/$$-keep-logs /tmp/$$-ftclean-data
+fi
+if [ "${for_test}" ]; then
+ echo -n ' --for-test' >>/tmp/$$-ftclean-logger
+ ls /nvdata/certs/test/*.0 | sed -e 's;/nvdata/certs/test/\(.*\);/data/usr/lib/ssl/certs/\1;' >/tmp/$$-for-test
+ cp -fp /nvdata/certs/test/*.0 /usr/lib/ssl/certs/
+ if [ -e /nvdata/certs/test/authorized_keys ]; then
+  echo /data/home/admin/.ssh/authorized_keys >>/tmp/$$-for-test
+  mkdir -p /home/admin/.ssh
+  cp -f /nvdata/certs/test/authorized_keys /home/admin/.ssh/authorized_keys
+  chown -R admin:adm /home/admin/.ssh
+  chmod 2700 /home/admin/.ssh
+  chmod  600 /home/admin/.ssh/authorized_keys
+ fi
+ grep -F -v -f /tmp/$$-for-test /tmp/$$-ftclean-data >/tmp/$$-keep-logs
+ mv /tmp/$$-keep-logs /tmp/$$-ftclean-data
+fi
+for retain_script in `df | sed -n -e 's;.* \(/[^/][^/]*\)$;\1/etc/update/retain/\1;p'`; do
+ if [ -x ${retain_script} ]; then
+  ${retain_script} /tmp/$$-ftclean-data
+ fi
+done
+if [ "${reboot_method}" ]; then
+ echo ' --reboot' >>/tmp/$$-ftclean-logger
+ logger -s -t ftclean -p err </tmp/$$-ftclean-logger
+ mv /tmp/$$-ftclean-data /tmp/fs-stop-data-rm
+ reboot -d 2
+else
+ echo ' (no reboot)' >>/tmp/$$-ftclean-logger
+ logger -s -t ftclean -p err </tmp/$$-ftclean-logger
+ tr \\n \\0 </tmp/$$-ftclean-data | xargs -0 rm -f
+ sed -e 's;^\(.*\)/[^/]*$;\1;' /tmp/$$-ftclean-data | sort -ru | tr \\n \\0 | xargs -r -0 -t rmdir 2>/dev/null
+ # from fs start...
+ bank=`sed -e 's;.*(rootfs\(.\)).*;\1;' /proc/cmdline`
+ ctrlmtdn=`sed -n -e "s;mtd\([0-9]*\):.*\"ctrl${bank}\";\1;p" /proc/mtd`
+ partitions=`sed -n -e '8s;[^ ]*;/&;gp' /dev/mtd${ctrlmtdn}`
+ for partition in ${partitions}; do
+  if [ -x ${partition}/etc/fs_start${partition} ]; then
+   ${partition}/etc/fs_start${partition}
+  fi
+ done
+ echo "Phone reset to factory defaults"
+fi

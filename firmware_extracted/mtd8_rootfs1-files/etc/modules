@@ -1,0 +1,29 @@
+# list of modules to be loaded
+
+# event (input)
+evdev
+
+# hal audio
+halaudio
+halaudio_apm
+halaudio_pcm
+halaudio_usb
+
+# ? magically brings in all the bcmring_ ?
+bcmring_rng
+
+# 802.1Q tagging
+8021q
+
+# iptables QoS
+xt_DSCP
+xt_CLASSIFY
+
+# VPN
+ppp_generic
+ppp_async
+tun
+
+# ALSA
+#soundcore
+#snd

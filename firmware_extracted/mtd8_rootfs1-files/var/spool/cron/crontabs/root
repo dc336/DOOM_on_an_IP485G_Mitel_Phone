@@ -1,0 +1,3 @@
+5 * * * * /usr/sbin/logrotate /etc/logrotate.conf
+45 10 * * 1 echo | cat /var/tmp/scrub0 - | head -1 | xargs scrub0 >/var/tmp/$$; mv /var/tmp/$$ /var/tmp/scrub0
+15 14 * * 4 echo | cat /var/tmp/scrub0 - | head -1 | xargs scrub0 >/var/tmp/$$; mv /var/tmp/$$ /var/tmp/scrub0

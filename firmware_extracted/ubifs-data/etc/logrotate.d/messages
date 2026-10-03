@@ -1,0 +1,7 @@
+/data/var/log/messages{
+    size 10M
+    rotate 2
+    ifempty
+    missingok
+    copytruncate
+}

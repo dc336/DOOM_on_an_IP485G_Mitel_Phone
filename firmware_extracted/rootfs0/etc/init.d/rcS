@@ -1,0 +1,41 @@
+#!/bin/ash
+
+# Exactly three digits in the name of the scripts.
+# S/K???* scripts in /etc/rc.d source'd in numerical order,
+# ex. S010xx executes eariler than S020xx
+
+umask 0002
+
+# common init.d variables
+#  booted bank
+bootbank=`sed -e 's;.*(rootfs\(.\)).*;\1;' /proc/cmdline`
+#  /dev/mtd number for booted ctrl partition
+ctrlmtdn=`sed -n -e "s;mtd\([0-9]*\):.*\"ctrl${bootbank}\";\1;p" /proc/mtd`
+#  read-only partitions to unionize
+partitions=`sed -n -e '8p' /dev/mtd${ctrlmtdn}`
+
+case "$1" in
+ start|"")
+  for i in /etc/rc.d/S???*; do
+   [ ! -f "$i" ] && continue
+   echo $i ...
+   echo $i | sed -e 's;.*/.\(...\).*;\1;' >/proc/lcd/progress
+   . $i $1
+  done
+  echo $i done
+  ;;
+
+ stop)
+  for i in /etc/rc.d/K???*; do
+   [ ! -f "$i" ] && continue
+   echo $i ...
+   . $i $1
+  done
+  echo $i done
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}"
+  exit 1
+  ;;
+esac

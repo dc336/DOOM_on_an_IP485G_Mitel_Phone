@@ -1,0 +1,99 @@
+#!/bin/ash
+ENABLE_GIG=$(sed -n -e 's;Product.*:.*G;G;p' /proc/hardware)
+usage () {
+ if [ "${ENABLE_GIG}" ]; then
+  echo 'Usage: ftespeed [lan|pc] [auto|10/Full|10/Half|100/Full|100/Half|1000]'
+ else
+  echo 'Usage: ftespeed [lan|pc] [auto|10/Full|10/Half|100/Full|100/Half]'
+ fi
+ echo Failure
+ exit 1
+}
+checkresult () {
+ RESULT=$?
+ if [ ${RESULT} != 0 ]; then
+  echo Failure
+  exit ${RESULT}
+ fi
+}
+if [ $# != 2 ]; then
+ usage
+fi
+case $1 in
+ pc|0)
+  PHY=0
+  ;;
+ lan|1)
+  PHY=1
+  ;;
+ *)
+  usage
+  ;;
+esac
+case $2-#-${ENABLE_GIG} in
+ auto-#-)
+  REG0=0x1200
+  REG4=0x01e1
+  REG9=0x0000
+  ;;
+ auto-#-G)
+  REG0=0x1240
+  REG4=0x01e1
+  REG9=0x0300
+  ;;
+ 10-#-|10-#-G|10/Full-#-|10/Full-#-G)
+  REG0=0x0100
+  REG4=0x01e1
+  REG9=0x0000
+  ;;
+ 10/Half-#-|10/Half-#-G)
+  REG0=0x0000
+  REG4=0x01e1
+  REG9=0x0000
+  ;;
+ 100-#-|100-#-G|100/Full-#-|100/Full-#-G)
+  REG0=0x2100
+  REG4=0x01e1
+  REG9=0x0000
+  ;;
+ 100/Half-#-|100/Half-#-G)
+  REG0=0x2000
+  REG4=0x01e1
+  REG9=0x0000
+  ;;
+ 1000-#-G|1000/Full-#-G)
+  REG0=0x1340
+  REG4=0x0001
+  REG9=0x0200
+  ;;
+ 1000/Half-#-G)
+  REG0=0x1240
+  REG4=0x0001
+  REG9=0x0100
+  ;;
+ *)
+  usage
+  ;;
+esac
+CURR_REG0=$(eth mii ${PHY} 0 ?)                 # get current REG0
+CURR_REG0=$((CURR_REG0 + 0))                    # convert to decimal
+CURR_REG0=$(dc 19584 ${CURR_REG0} and p)        # mask to unaffected by speed (19584 = 0x4C80)
+REG0=$((REG0 + 0))                              # convert desired to decimal
+REG0=0x$(dc ${REG0} ${CURR_REG0} or 16 o p)     # combine w/ unaffected and convert back to hex
+echo eth mii ${PHY} 4 ${REG4}
+usleep 10000
+eth mii ${PHY} 4 ${REG4}
+checkresult
+usleep 50000
+echo eth mii ${PHY} 9 ${REG9}
+usleep 10000
+eth mii ${PHY} 9 ${REG9}
+checkresult
+usleep 50000
+echo eth mii ${PHY} 0 ${REG0}
+usleep 10000
+eth mii ${PHY} 0 ${REG0}
+checkresult
+usleep 50000
+echo Success
+exit 0

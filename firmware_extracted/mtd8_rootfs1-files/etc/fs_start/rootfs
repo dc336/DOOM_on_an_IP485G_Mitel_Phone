@@ -1,0 +1,30 @@
+#!/bin/ash
+# always correct empty /etc/passwd
+if [ ! -s /etc/passwd ]; then
+ rm -f /data/etc/passwd
+fi
+
+# ensure /data directories exist for the operations below
+mkdir -p /data/etc/logrotate.d /data/var/log /data/home/admin /data/etc/update /data/webroot/phones
+
+# group forced, cannot write
+chmod 2755 /data/etc/logrotate.d /data/home/admin /data/var/log
+
+# root:root
+chown -R root:root /data/etc/logrotate.d
+chmod -R g-w /data/etc/logrotate.d
+
+# root:adm
+chown -R root:adm /data/var/log
+chmod -R g-w /data/var/log
+
+# admin:adm
+chown -R admin:adm /data/home/admin
+chmod -R g-w /data/home/admin
+
+# group forced, can write
+chmod 2775 /data/etc/update /data/webroot /data/webroot/phones
+
+# root:update
+chown -R root:update /data/etc/update /data/webroot
+chmod -R g+w /data/etc/update /data/webroot

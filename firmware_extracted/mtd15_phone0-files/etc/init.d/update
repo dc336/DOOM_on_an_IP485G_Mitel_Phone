@@ -1,0 +1,54 @@
+#!/bin/ash
+#
+# one-time update script
+
+case "$1" in
+ start|"")
+  updated=
+  for cfg_file in /nvdata/config/pphone.conf /nvdata/config/pphone.conf.back; do
+   if [ -s ${cfg_file} ]; then
+    sed -e '/^\[audiohaldm\]$/,/^$/d' ${cfg_file} | grep -v ^usbPowerEnable= >/tmp/pphone.conf
+    if ! cmp -s /tmp/pphone.conf ${cfg_file}; then
+     mv /tmp/pphone.conf ${cfg_file}
+     updated="${updated} ${cfg_file}"
+    else
+     rm /tmp/pphone.conf
+    fi
+   fi 
+  done
+
+  /usr/bin/crontab -u root -l >/tmp/root-crontab
+  if ! grep telemeter /tmp/root-crontab; then
+   echo "0,5,10,15,20,25,30,35,40,45,50,55 * * * * nice -n 10 /usr/bin/telemeter" | cat /tmp/root-crontab - | /usr/bin/crontab -u root -
+   updated="${updated} /var/spool/cron/crontabs/root"
+  fi
+  rm /tmp/root-crontab
+
+  # only on p8cg, create button-box image
+  currbank=`sed -n -e 's;.*rootfs\([01]\).*;\1;p' /proc/cmdline`
+  p8cg_ctrl=`cd /webroot/bank${currbank}; ls *ctrl.bin`
+  p8cg_manifest=`cd /webroot/bank${currbank}; ls p8cg-*.txt`
+  p8cg_toc=${p8cg_manifest#*-}
+  exclude_pattern=`sed -n -e 's;^bb_\([^\t]*\)\t.*;\1;p' /webroot/bank${currbank}/$p8cg_manifest | tr '\n' '|' | sed -e 's;^;^(;' -e 's;|$;)\\\>;'`
+  grep -v -E "${exclude_pattern}" /webroot/bank${currbank}/${p8cg_manifest} | sed -e 's;^bb_;;' -e 's;bb_ctrl$;ctrl;' > /webroot/bank${currbank}/bb-bb.txt
+  sed -e "s;p8cg\\t\([0-9]*\)\\t\([^\\t]*\).*;bb\\t\1\\t\2\\tbb-bb.txt\\t`openssl dgst -sha1 /webroot/bank${currbank}/bb-bb.txt | awk '{ print $2 }'`\\tBB424;" /webroot/bank${currbank}/${p8cg_toc} > /webroot/bank${currbank}/bb.txt
+  touch -r /webroot/bank${currbank}/${p8cg_toc} /webroot/bank${currbank}/bb.txt /webroot/bank${currbank}/bb-bb.txt
+
+  logger -s -t init.d/update -p info ${updated} bb.txt
+  hotfixes=`ls -rt /nvdata/hotfixes 2>/dev/null | sed -e 's;\.tgz$;;'`
+  if [ "${hotfixes}" ]; then
+   logger -s -t init.d/update -p info refreshing hotfixes ${hotfixes}
+   hotfix --install ${hotfixes}
+  fi
+  # make this "one time"
+  rm -f /etc/init.d/update
+  ;;
+
+ stop)
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+esac

@@ -1,0 +1,37 @@
+echo "$1 interface status change detected - $2"
+
+STATUS=$2
+
+if [ "$STATUS" = "up" ]; then
+  ifconfig $1 0.0.0.0 up
+  brctl addif br0 $1
+
+  model=`sed -n -e 's;\(.*\);\1;p' /proc/manuf/model`
+  firmware=`sed -n -e 's;[^#]*#\([0-9.a-zA-Z]*\).*;\1;p' /proc/version`
+  software=`sed -n -e 's;\([^ ][0-9.a-zA-Z]\+\).*;\1;p' /etc/issue`
+  rev=`sed -n -e 's;\([0-9]\+\).*;\1;p' /proc/manuf/hwCompatibility`
+  desc="ShoreTel $model Kernel Version: $firmware Software Version: $software HW Revision: $rev"
+
+  killall -q lldpd
+  rm -f /var/run/lldpd.*
+  /bin/mkdir -p /var/run/lldpd
+  # lldpd is restarted by phone app if LLDP is enabled. 
+  # The one we start here will be killed by phone app right before it restarts lldpd.
+  # If LLDP is disabled, the one started below is used to collect bboxes info
+  /usr/sbin/lldpd -M 3 -d -S "$desc" &
+
+  # launch httpd to serve software update
+  # TODO: httpd does not need to run forever. kill it after 30 minutes
+  httpd -p 169.254.0.1:8080 -h /webroot
+else
+  ifconfig $1 down
+  brctl delif br0 $1
+fi
+
+# let phone app know
+if [ -S /tmp/cli_interface_socket ]; then
+  echo usbnetchangeevent | netcat -U /tmp/cli_interface_socket 2>&1 >/dev/null
+fi
+
+#ifplugd -i $1 -f -a -M -I -r /etc/ifusb-p8cg
+exit 0

@@ -1,0 +1,237 @@
+#!/bin/ash
+# get upper-case product name
+PRODUCT_UC=$(sed -n -e 's;Product.*: ;;p' /proc/hardware)
+# extract key parameters from product name
+case ${PRODUCT_UC} in
+ P8)
+   LINES_LO=1-8
+   LINES=8
+   LINES_TR=5-81-4
+   LINE_KEYS="line1 line2 line3 line4 line5 line6 line7 line8"
+   OTHER_KEYS="headset speaker message mute"
+   ;;
+
+ P8G)
+   LINES_LO=1-8
+   LINES=8
+   LINES_TR=5-81-4
+   LINE_KEYS="line1 line2 line3 line4 line5 line6 line7 line8"
+   OTHER_KEYS="headset speaker message mute"
+   ;;
+
+ P8CG)
+   LINES_LO=1-8
+   LINES=8
+   LINES_TR=5-81-4
+   LINE_KEYS="line1 line2 line3 line4 line5 line6 line7 line8"
+   OTHER_KEYS="headset speaker message mute"
+   ;;
+
+ P2)
+   LINES_LO=1-2
+   LINES=2
+   LINES_TR=1-2
+   LINE_KEYS="line1 line2"
+   OTHER_KEYS="headset speaker message mute"
+   ;;
+
+ P2G)
+   LINES_LO=1-2
+   LINES=2
+   LINES_TR=1-2
+   LINE_KEYS="line1 line2"
+   OTHER_KEYS="headset speaker message mute"
+   ;;
+
+ BB424)
+   LINES_LO=1-9
+   LINES=24
+   LINES_TR=1-24
+   LINE_KEYS="line1 line2 line3 line4 line5 line6 line7 line8 line9 line10 line11 line12 line13 line14 line15 line16 line17 line18 line19 line20 line21 line22 line23 line24"
+   OTHER_KEYS="page1 page2 page3 page4"
+   ;;
+
+ *)
+   echo "Product is UNKNOWN"
+   usage
+   ;;
+esac
+
+usage () {
+ if [ ${PRODUCT_UC} == BB424 ]; then
+   echo 'Usage: ftled [all|lineN|line|pageN|page] [red|amber|green|all] brightness'
+   echo "    lineN's N is 1..$LINES (from the upper left)"
+ else
+   echo 'Usage: ftled [all|lineN|headset|speaker|message|mute] [red|amber|green] brightness'
+   echo "    lineN's N is 1..$LINES (from the upper right)"
+ fi
+ echo '    brightness is percentage: 0 (off), 5 (dim), 100 (on)'
+ echo Failure
+ exit 1
+}
+
+checkresult () {
+ RESULT=$?
+ if [ ${RESULT} != 0 ]; then
+  echo Failure
+  exit ${RESULT}
+ fi
+}
+
+if [ $# != 3 ]; then
+ usage
+fi
+
+case $1 in
+ all)
+   LEDS="${LINE_KEYS} ${OTHER_KEYS}"
+   ;;
+
+ line[${LINES_LO}])
+   LEDS=$1
+   ;;
+
+ line1[0-9])
+   if [ ${PRODUCT_UC} != BB424 ]; then
+     echo "$1 LED does not exist on this product"
+     exit 1
+   fi
+   LEDS=$1
+   ;;
+ 
+ line2[0-4])
+   if [ ${PRODUCT_UC} != BB424 ]; then
+     echo "$1 LED does not exist on this product"
+     exit 1
+   fi
+   LEDS=$1
+   ;;
+ 
+ line)
+   LEDS=${LINE_KEYS}
+   ;;
+
+ page[1-4])
+   if [ ${PRODUCT_UC} != BB424 ]; then
+     echo "$1 LED does not exist on this product"
+     exit 1
+   fi
+   LEDS=$1
+   ;;
+ 
+ headset|speaker|message|mute)
+   if [ ${PRODUCT_UC} == BB424 ]; then
+     echo "$1 LED does not exist on this product"
+     exit 1
+   fi
+   LEDS=$1
+   ;;
+ 
+ page)
+  if [ ${PRODUCT_UC} != BB424 ]; then
+    echo "Page keys do not exist on this product"
+    exit 1
+  fi
+  LEDS=${OTHER_KEYS}
+  ;;
+
+ *)
+  usage
+  ;;
+esac
+
+if [ ${PRODUCT_UC} == BB424 ]; then
+ LEDS=${LEDS}
+else
+ LEDS="$(echo "${LEDS}" | tr 1-8 ${LINES_TR})"
+fi
+
+case $2 in
+
+ red)
+  if [ $1 == headset ]; then
+    echo "Headset LED can only be green"  
+    exit 1
+  fi
+  if [ $1 == speaker ]; then
+    echo "Speaker LED can only be green"  
+    exit 1
+  fi
+  ON_COLORS=red
+  if [ $1 == message ] | [ $1 == mute ]; then
+    OFF_COLORS=
+  else
+    OFF_COLORS=green
+  fi
+  ;;
+
+ green)
+  if [ $1 == mute ]; then
+    echo "Mute LED can only be red"
+    exit 1
+  fi
+  if [ $1 == message ]; then
+    echo "Message LED can only be red"
+    exit 1
+  fi
+  ON_COLORS=green
+  if [ $1 == speaker ] | [ $1 == headset ]; then
+    OFF_COLORS=
+  else
+    OFF_COLORS=red
+  fi
+  ;;
+
+ all|amber)
+  ON_COLORS='red green'
+  OFF_COLORS=
+  ;;
+ *)
+  usage
+  ;;
+esac
+
+case $3 in
+ off)
+  BRIGHTNESS=0
+  ;;
+ dim)
+  BRIGHTNESS=50
+  ;;
+ on|bright|100)
+  BRIGHTNESS=100
+  ;;
+ [0-9]|[0-9][0-9])
+  BRIGHTNESS=$3
+  ;;
+ *)
+  usage
+  ;;
+esac
+
+for LED in $LEDS; do
+ for OFF_COLOR in ${OFF_COLORS}; do
+  if ! [ -e /sys/class/leds/${LED}:${OFF_COLOR}/brightness ]; then
+   if [ "$1" != "all" ]; then
+    echo "${LED}:${OFF_COLOR} does not exist, quietly ignored"
+   fi
+  else
+   echo "echo 0 > /sys/class/leds/${LED}:${OFF_COLOR}/brightness"
+   echo 0 > /sys/class/leds/${LED}:${OFF_COLOR}/brightness
+   checkresult
+  fi
+ done
+ for ON_COLOR in ${ON_COLORS}; do
+  if ! [ -e /sys/class/leds/${LED}:${ON_COLOR}/brightness ]; then
+   if [ "$1" != "all" ]; then
+    echo "${LED}:${ON_COLOR} does not exist, quietly ignored"
+   fi
+  else
+   echo "echo ${BRIGHTNESS} > /sys/class/leds/${LED}:${ON_COLOR}/brightness"
+   echo ${BRIGHTNESS} > /sys/class/leds/${LED}:${ON_COLOR}/brightness
+   checkresult
+  fi
+ done
+done
+echo Success
+exit 0

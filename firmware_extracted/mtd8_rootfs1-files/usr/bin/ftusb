@@ -1,0 +1,57 @@
+#!/bin/ash
+# get upper-case product name
+PRODUCT_UC=$(sed -n -e 's;Product.*: ;;p' /proc/hardware)
+if [ ${PRODUCT_UC} != "P8CG" ]; then
+ echo USB only available on P8CG
+ echo Failure
+ exit 1
+fi
+checkresult () {
+ RESULT=$?
+ if [ ${RESULT} != 0 ]; then
+  echo Failure
+  kill -TERM $tailpid
+  exit ${RESULT}
+ fi
+}
+modprobe -r sd_mod
+tail -f -n 0 /var/log/messages >/tmp/ftu$$ &
+tailpid=`ps -o pid,pgid,comm | grep "$$ tail" | sed -e 's;^ *\([0-9]*\).*;\1;'`
+gpio output 27 1
+checkresult
+modprobe ohci_hcd
+checkresult
+modprobe ehci_hcd
+checkresult
+modprobe usb_storage
+checkresult
+modprobe sd_mod
+checkresult
+if ! [ -d /mnt ]; then
+ mkdir -p /mnt
+ checkresult
+ RMDIR_MNT='rmdir /mnt'
+else
+ RMDIR_MNT=
+fi
+qsecs=40
+while ! grep -q -s "Attached SCSI removable disk" /tmp/ftu$$; do
+ echo -n .
+ qsecs=$((qsecs-1))
+ [ $qsecs -lt 0 ] && break
+ usleep 250000
+done
+echo
+mount /dev/sda1 /mnt
+checkresult
+echo Success >/mnt/ftusb.success
+checkresult
+cat /mnt/ftusb.success
+checkresult
+rm /mnt/ftusb.success
+checkresult
+umount /mnt
+checkresult
+${RMDIR_MNT}
+kill -TERM $tailpid
+exit 0

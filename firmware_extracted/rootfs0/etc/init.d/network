@@ -1,0 +1,63 @@
+#!/bin/ash
+#
+# network
+#
+# bring up network driver and interface
+# configure the network interface
+
+case "$1" in
+ start|"")
+  # Configure the loopback interface
+  ifconfig lo 127.0.0.1 netmask 255.0.0.0 up
+  # Check for eth0
+  if ifconfig eth0 2>&1 >/dev/null; then
+   mac_address_eth=`cat /proc/manuf/macAddress`
+   # Bind MAC
+   if [ -z ${mac_address_eth} ]; then
+    echo "********************"
+    echo "** Error - No MAC address specified!"
+    echo "********************"
+   else
+    ifconfig eth0 hw ether ${mac_address_eth}
+   fi
+  fi
+  echo -n P | cat - /proc/manuf/serialNumber | sed -e 's;^P\([A-Za-z]\);\1;' > /proc/sys/kernel/hostname
+  # Make mem limits consistent
+  rmem_max="`sysctl -n net.core.rmem_max`"
+  tcp_rmem="`sysctl -n net.ipv4.tcp_rmem`"
+  tcp_rmem_min="`echo ${tcp_rmem} | awk '{print $1}'`"
+  tcp_rmem_default="`echo ${tcp_rmem} | awk '{print $2}'`"
+  tcp_rmem_max="`echo ${tcp_rmem} | awk '{print $3}'`"
+  [ ${tcp_rmem_max} -le ${rmem_max} ] || tcp_rmem_max=${rmem_max} 
+  [ ${tcp_rmem_default} -le ${rmem_max} ] || tcp_rmem_default=${rmem_max} 
+  sysctl -w net.ipv4.tcp_rmem="${tcp_rmem_min} ${tcp_rmem_default} ${tcp_rmem_max}"
+  wmem_max="`sysctl -n net.core.wmem_max`"
+  tcp_wmem="`sysctl -n net.ipv4.tcp_wmem`"
+  tcp_wmem_min="`echo ${tcp_wmem} | awk '{print $1}'`"
+  tcp_wmem_default="`echo ${tcp_wmem} | awk '{print $2}'`"
+  tcp_wmem_max="`echo ${tcp_wmem} | awk '{print $3}'`"
+  [ ${tcp_wmem_max} -le ${wmem_max} ] || tcp_wmem_max=${wmem_max} 
+  [ ${tcp_wmem_default} -le ${wmem_max} ] || tcp_wmem_default=${wmem_max} 
+  sysctl -w net.ipv4.tcp_wmem="${tcp_wmem_min} ${tcp_wmem_default} ${tcp_wmem_max}"
+
+  # configure Broadcom internal ethernet switch to allow 802.1x traffic on the PC and LAN ports
+  eth mport cfg 5 01:80:c2:00:00:03 0x103
+
+  # block ports used only for bbox on bridge interface
+  /sbin/iptables -I INPUT -i eth+ -p tcp --dport 9000 -j DROP
+  /sbin/iptables -I INPUT -i eth+ -p tcp --dport 9005 -j DROP
+  /sbin/iptables -I INPUT -i eth+ -p tcp --dport 514 -j DROP
+  ;;
+
+ stop)
+  ip addr flush dev eth0
+  killall -q udhcpc
+  net_pids=`cat /var/run/ifplugd.*.pid /var/run/lldpd.pid 2>/dev/null`
+  [ "${net_pids}" ] && kill ${net_pids}
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+esac

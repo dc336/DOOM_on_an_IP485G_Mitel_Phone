@@ -1,0 +1,58 @@
+#!/bin/ash
+usage () {
+ echo 'Usage: ftping [lan|pc] ip_address'
+ echo Failure
+ exit 1
+}
+checkresult () {
+ RESULT=$?
+ if [ ${RESULT} != 0 ]; then
+  echo Failure
+  exit ${RESULT}
+ fi
+}
+if [ $# != 2 ]; then
+ usage
+fi
+case $1 in
+ lan)
+  PRIMARY_PHY=true
+  ;;
+ pc)
+  PRIMARY_PHY=
+  ;;
+ *)
+  usage
+  ;;
+esac
+#
+# Success on PHY is: (TxOctets > 10240) && (RxOctets > 10240)
+# Maybe is when both PHY are true
+# Failure is when PHY is not true
+#
+BEFORE=$(eth mib show | sed -n -e 's/.* TxOctets *\([^ ]*\) *\([^ ]*\) .*/\1 \2/p' -e 's/.* RxOctets *\([^ ]*\) *\([^ ]*\) .*/\1 \2/p' | tr \\n ' ')
+ping -c 10 -s 1016 $2
+checkresult
+AFTER=$(eth mib show | sed -n -e 's/.* TxOctets *\([^ ]*\) *\([^ ]*\) .*/\1 \2/p' -e 's/.* RxOctets *\([^ ]*\) *\([^ ]*\) .*/\1 \2/p' | tr \\n ' ')
+if [ ${PRIMARY_PHY} ]; then
+ TXSUCCESS=$(dc $(echo "${AFTER}${BEFORE}" | sed -e 's/\([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\)/\2 \6 - p/'))
+ RXSUCCESS=$(dc $(echo "${AFTER}${BEFORE}" | sed -e 's/\([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\)/\4 \8 - p/'))
+ TXMAYBE=$(dc $(echo "${AFTER}${BEFORE}" | sed -e 's/\([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\)/\1 \5 - p/'))
+ RXMAYBE=$(dc $(echo "${AFTER}${BEFORE}" | sed -e 's/\([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\)/\3 \7 - p/'))
+else
+ TXSUCCESS=$(dc $(echo "${AFTER}${BEFORE}" | sed -e 's/\([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\)/\1 \5 - p/'))
+ RXSUCCESS=$(dc $(echo "${AFTER}${BEFORE}" | sed -e 's/\([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\)/\3 \7 - p/'))
+ TXMAYBE=$(dc $(echo "${AFTER}${BEFORE}" | sed -e 's/\([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\)/\2 \6 - p/'))
+ RXMAYBE=$(dc $(echo "${AFTER}${BEFORE}" | sed -e 's/\([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\) \([^ ]*\)/\4 \8 - p/'))
+fi
+if [ $(($((TXSUCCESS >= 10240))+$((RXSUCCESS >= 10240)))) == 2 ]; then
+ if [ $(($((TXMAYBE >= 10240))+$((RXMAYBE >= 10240)))) == 2 ]; then
+  echo Maybe
+ else
+  echo Success
+ fi
+ exit 0
+else
+ echo Failure
+ exit 1
+fi

@@ -1,0 +1,33 @@
+#!/bin/ash
+usage () {
+ echo 'Usage: ftip [<address> [<netmask>]|dhcp]'
+ echo Failure
+ exit 1
+}
+checkresult () {
+ RESULT=$?
+ if [ ${RESULT} != 0 ]; then
+  echo Failure
+  exit ${RESULT}
+ fi
+}
+if [ $# != 1 -a $# != 2 ]; then
+ usage
+fi
+if_setup.sh down 2>/dev/null
+if [ "$1" == "dhcp" ]; then
+ ifconfig eth0 up
+ REQUEST_IP=`sed -n -e 's;lease.ipAddress;--request;p' /nvdata/netcache`
+ udhcpc -b -i eth0 -s /usr/share/udhcpc/default.script ${REQUEST_IP} -p /var/run/udhcpc.eth0.pid
+ checkresult
+else
+ if [ $# == 1 ]; then
+  ifconfig eth0 $1
+  checkresult
+ else
+  ifconfig eth0 $1 netmask $2
+  checkresult
+ fi
+fi
+echo Success
+exit 0

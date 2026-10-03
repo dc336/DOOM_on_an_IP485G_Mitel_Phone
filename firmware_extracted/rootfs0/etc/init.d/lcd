@@ -1,0 +1,31 @@
+#!/bin/ash
+#
+# lcd
+#
+# propagate any manuf brightness, contrast
+#
+
+case "$1" in
+ start|"")
+  if [ -e /proc/manuf/contrast -a -e /proc/lcd/contrast ]; then
+   cat /proc/manuf/contrast > /proc/lcd/contrast
+  fi
+  if [ -e /proc/manuf/brightness -a -e /sys/devices/platform/lcdfb-bl/backlight/lcdfb-bl/brightness ]; then
+   cat /proc/manuf/brightness > /sys/devices/platform/lcdfb-bl/backlight/lcdfb-bl/brightness
+  fi
+  ;;
+
+ stop)
+  if [ -e /sys/devices/platform/lcdfb-bl/backlight/lcdfb-bl/brightness ]; then
+   echo 0 > /sys/devices/platform/lcdfb-bl/backlight/lcdfb-bl/brightness
+  fi
+  if [ -e /proc/lcd/contrast ]; then
+   echo 0 > /proc/lcd/contrast
+  fi
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+esac

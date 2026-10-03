@@ -1,0 +1,28 @@
+# /etc/inittab
+#
+# Format for each entry: <id>:<runlevels>:<action>:<process>
+#
+# id        == tty to run on, or empty for /dev/console
+# runlevels == ignored
+# action    == one of sysinit, respawn, askfirst, wait, and once
+# process   == program to run
+
+# Startup the system
+null::sysinit:/bin/mount -o remount /
+null::sysinit:/bin/mount -t proc proc /proc
+null::sysinit:/bin/mount -a
+
+# now run any rc scripts
+
+::sysinit:/etc/init.d/rcS start
+#Change ttyS0 to your targeted console port (ttyS0, ttyS1)
+ttyAMA0::askfirst:/bin/sh --login
+::restart:/sbin/init
+::shutdown:/etc/init.d/rcS stop
+null::shutdown:/bin/umount -a -r
+
+#
+# Only do this if we always want a bash shell available
+# on the USB connection. This requires the g_serial.ko
+# to be loaded.
+#ttygserial:2345:respawn:/sbin/getty -L -n -i -l /bin/sh ttygserial 115200 vt100

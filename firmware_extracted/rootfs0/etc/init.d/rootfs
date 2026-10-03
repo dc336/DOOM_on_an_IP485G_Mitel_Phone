@@ -1,0 +1,21 @@
+#!/bin/ash
+#
+# no phone available: launch final rootfs application
+
+case "$1" in
+ start|"")
+  # no phone app, start up networking
+  logger -s -t init.d/rootfs -p err "starting network"
+  if_setup.sh up
+  # factory_load only activates for manufacturing burn-in
+  factory_load
+  ;;
+
+ stop)
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+esac

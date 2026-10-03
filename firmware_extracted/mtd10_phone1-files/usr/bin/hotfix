@@ -1,0 +1,70 @@
+#!/bin/ash
+# 
+# hotfix --op hotfix-sha1
+operations="--install|--uninstall|--verify"
+usage () {
+ echo "Usage: hotfix ${operations} hotfix-sha1"
+ exit 1
+}
+abend () {
+ logger -s -t hotfix -p err "$2"
+ echo "$2"
+ rm -rf /tmp/dp$$
+ exit $1
+}
+logger -s -t hotfix -p info "invoked w/ $@"
+if [ $# -lt 2 ] || ! echo "$1" | grep -q -E "^(${operations})\$"; then
+ usage
+fi
+operation="$1"
+shift
+if echo $* | tr ' ' \\n | grep -v -E '^([0-9a-f]{40})$'; then
+ echo "Error: hotfix-sha1 components are 40 hexadecimal digits long"
+ usage
+fi
+mkdir -p /tmp/dp$$
+while [ "$1" ]; do
+ # validate hotfix component exists
+ tgz=/nvdata/hotfixes/$1.tgz
+ if [ ! -s $tgz ]; then
+  abend 1 "Error: hotfix-sha1 $1.tgz does not exist in /nvdata/hotfixes"
+ fi
+ # validate hotfix component name
+ if [ "`cat $tgz | openssl dgst -sha1`" != "$1" ]; then
+  abend 1 "Error: hotfix-sha1 $1 failed its name hash check"
+ fi
+ tar xzf $tgz -C /tmp/dp$$ hotfix
+ # validate version
+ if [ "`cat /tmp/dp$$/hotfix/version`" != "1.0" ]; then
+  abend 1 "Error: $1 version \"`cat /tmp/dp$$/hotfix/version`\" not understood"
+ fi
+ # validate hotfix component certificate
+ cat /tmp/dp$$/hotfix/certificate | openssl verify -CApath /nvdata/certs/fwca >/tmp/dp$$/verify
+ status=$?
+ if [ ${status} -ne 0 -o "`cat /tmp/dp$$/verify`" != "stdin: OK" ]; then
+  abend 1 "Error: $1 certificate verify \"`cat /tmp/dp$$/verify`\", status ${status}"
+ fi
+ # extract certificate public key
+ openssl x509 -in /tmp/dp$$/hotfix/certificate -pubkey -noout >/tmp/dp$$/pubkey
+ # verify signature
+ tar tf $tgz --exclude hotfix/certificate --exclude hotfix/signature >/tmp/dp$$/manifest
+ tar tvf $tgz --numeric-owner --exclude hotfix/certificate --exclude hotfix/signature | sed -e 's;^\([^ ]* [^ ]*\) .*;\1;' >>/tmp/dp$$/manifest
+ tar xzfO $tgz --exclude hotfix/certificate --exclude hotfix/signature | cat /tmp/dp$$/manifest - | \
+   openssl dgst -sha1 -verify /tmp/dp$$/pubkey -signature /tmp/dp$$/hotfix/signature >/tmp/dp$$/verify
+ status=$?
+ if [ ${status} -ne 0 -o "`cat /tmp/dp$$/verify`" != "Verified OK" ]; then
+  abend 1 "Error: $1 certificate verify \"`cat /tmp/dp$$/verify`\", status ${status}"
+ fi
+ # invoke hotfix's own hotfix script
+ chmod +x /tmp/dp$$/hotfix/hotfix
+ /tmp/dp$$/hotfix/hotfix $operation $1
+ status=$?
+ rm -rf /tmp/dp$$/*
+ if [ ${status} -ne 0 ]; then
+  abend ${status} "Error: $1 hotfix $operation failed"
+ fi
+ logger -s -t hotfix -p info "$1 ${operation} success"
+ echo "$1 ${operation} success"
+ shift
+done
+rm -rf /tmp/dp$$

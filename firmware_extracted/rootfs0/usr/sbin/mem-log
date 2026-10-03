@@ -1,0 +1,18 @@
+#!/bin/ash
+sipExtension=unknown
+userFirstName=unknown
+userLastName=unknown
+memlogPriority=info
+`grep -E '^(sipExtension|userFirstName|userLastName|memlogPriority)=' /nvdata/config/pphone.conf | sed -e 's;^\([^=]*\)=\([^"]* [^"]*\)$;\1="\2";' -e 's;^;export ;'`
+source /root/.profile
+eval `grep '^ *PHONE_APPLIC=' /etc/rc.d/S100applic`
+pidPhone=`pidof ${PHONE_APPLIC} 2>/dev/null`
+if [ "$pidPhone" ]; then
+ `cli -c 'getdm callstackdm.sessionCount' 2>/dev/null | sed -n -e 's;.*callstackdm.sessionCount = ;export active=;p'`
+ `sed -n -e 's;^\(VmSize\|VmRSS\):. *\([0-9]*\) kB;export phone\1=\2;p' /proc/${pidPhone}/status`
+else
+ active=dead
+ vmSize=-1
+ vmRSS=-1
+fi
+logger -t mem-log -p ${memlogPriority} "upDays=`awk '{ print $1/86400 }' /proc/uptime`, active=${active}, memFree=`awk '/MemFree:/ { print $2 }' /proc/meminfo`, buddyInfo=`sed -e 's;.*DMA *;;' -e 's;  *;:;g' -e 's;:$;;' /proc/buddyinfo`, phoneVmSize=${phoneVmSize}, phoneVmRSS=${phoneVmRSS}, mac=`cat /proc/manuf/macAddress`, model=`cat /proc/manuf/model`, ver=`sed -e 's;[^0-9.].*;;' /etc/issue`, ext=${sipExtension}, user=\"${userFirstName} ${userLastName}\""

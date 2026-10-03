@@ -1,0 +1,65 @@
+#!/bin/ash
+
+case "$1" in
+ start)
+  # remove any back door
+  if [ -s /home/admin/.ssh/authorized_keys ]; then
+   grep -v 'backdoor_key$' /home/admin/.ssh/authorized_keys >/home/admin/.ssh/authorized_keys.new
+   if ! cmp -s /home/admin/.ssh/authorized_keys /home/admin/.ssh/authorized_keys.new; then
+    chmod 600 /home/admin/.ssh/authorized_keys.new
+    chown admin:adm /home/admin/.ssh/authorized_keys.new
+    mv -f /home/admin/.ssh/authorized_keys.new /home/admin/.ssh/authorized_keys
+   else
+    rm /home/admin/.ssh/authorized_keys.new
+   fi
+  fi
+
+  # Start dropbear ssh server
+  if [ -x /usr/sbin/dropbear ]; then
+   # validate any existing RSA key
+   if [ -f /etc/dropbear/dropbear_rsa_host_key ]; then
+    /usr/bin/dropbearkey -y -f /etc/dropbear/dropbear_rsa_host_key || rm /etc/dropbear/dropbear_rsa_host_key
+   fi
+
+   # create new RSA key if required
+   if [ ! -f /etc/dropbear/dropbear_rsa_host_key ]; then
+    /usr/bin/dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
+    # quietly kill any running dropbear upon key regeneration
+    killall -q dropbear
+    if [ $? -eq 0 ]; then
+     logger -s -t init.d/dropbear -p err 'Start became restart after regenerating dropbear_rsa_host_key'
+    fi
+   fi
+
+   # ensure lastlog file exists
+   touch /var/log/lastlog
+
+   # high security for non-button-box
+   if [ "`cat /proc/manuf/software`" == "bb" ]; then
+    security=""
+   else
+    security="-s -w"
+   fi
+
+   # start dropbear nice, to give update utility (and support staff) a better chance not to swamp the phone app
+   nice -n 15 /usr/sbin/dropbear ${security} &
+  fi
+  ;;
+
+ stop)
+  killall -q dropbear
+  ;;
+
+ restart)
+  $0 stop
+  $0 start
+  ;;
+
+ status)
+  if pidof dropbear | sed 's;\<$$\>;;' | grep -q [0-9] ; then
+   echo "running"
+  else
+   echo "stopped"
+  fi
+  ;;
+esac

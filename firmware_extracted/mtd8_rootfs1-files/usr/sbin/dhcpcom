@@ -1,0 +1,20 @@
+#!/bin/sh
+
+netcat -U /var/run/udhcpc.socket << EOF
+$1
+ip=$ip
+subnet=$subnet
+broadcast=$broadcast
+router=$router
+dns=$dns
+lease=$lease
+xid=$xid
+serverid=$serverid
+option156=$option156
+ntpsrv=$ntpsrv
+tftp=$tftp
+EOF
+if [ $? -ne 0 ]; then
+    logger -t $0 -p user.error "DHCP daemon failed to send message"
+fi
+

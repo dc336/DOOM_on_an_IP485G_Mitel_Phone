@@ -1,0 +1,34 @@
+#!/bin/ash
+# 
+# update-stage-do [--idle] [--dbg] version [sources] [check]
+#
+model=
+idle=
+other=
+while [ "${1#--}" != "${1}" ]; do
+ if [ "${1}" == "--idle" ]; then
+  idle="--idle"
+ else
+  if [ "${1}" == "--bb" ]; then
+   model="--bb"
+  fi
+  other="${other} ${1}"
+ fi
+ shift
+done
+if [ $# -lt 1 ]; then
+ echo 'Usage: update-stage-do [--idle] [--dbg] version [sources] [check]'
+fi
+if [ "${model}" == "--bb" ]; then
+ cmd="update-stage ${other} $@"
+ prior_update_pgids=`ps -o pid,ppid,pgid,comm,args | grep -v "\<$$\>" | grep -v "${cmd}" | sed -n -e 's;^ *[0-9][0-9]*  *[0-9][0-9]*  *\([0-9][0-9]*\) update-stage .*$;\1;p'`
+ if [ -z "${prior_update_pgids}" ]; then
+  curr_update_pgids=`ps -o pid,ppid,pgid,comm | grep -v "\<$$\>" | sed -n -e 's;^ *[0-9][0-9]*  *[0-9][0-9]*  *\([0-9][0-9]*\) update-stage$;\1;p'`
+  if [ -n "${curr_update_pgids}" ]; then
+   logger -s -t update-stage-do -p info ' Update is already running -${curr_update_pgids}... exit normally.'
+   exit 0
+  fi
+ fi
+fi
+version=$1
+update-stage ${other} "$@" && update-do ${idle} ${version}

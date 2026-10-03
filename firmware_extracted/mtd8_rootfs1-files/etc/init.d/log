@@ -1,0 +1,132 @@
+#!/bin/ash
+#
+# log
+#
+# start syslog-ng & crond
+#
+
+syslog_ng_cron () {
+   cp /etc/syslog-ng.conf.orig /etc/syslog-ng.conf
+   # time zone                                                                                           
+   if [ -n "$2" ]; then
+      echo "Using user specified time zone: $2"
+      export TZ=$2
+   else
+      export TZ=`sed -n -e '1s;\([^,]*\).*;\1;p' /etc/TZ 2>/dev/null`
+      if [ -z "$TZ" ]; then
+         echo "Using default time zone: PST8PDT"
+         export TZ=PST8PDT
+      fi
+   fi
+   sed -e "/_time_zone(\"/s,\".*\",\"${TZ}\"," /etc/syslog-ng.conf >/tmp/syslog-ng.conf.$$
+   # lowest log level
+   if [ -n "$3" ]; then
+      echo "Using user specified lowest log level: $3"
+      grep -v "^[^#].*ilter[( ]f_loghost[){]" /tmp/syslog-ng.conf.$$ >/tmp/$$
+      echo "$3" | sed -e 's/\(.*\)/filter f_loghost{level(\1 .. emerg);};/' >>/tmp/$$
+      mv /tmp/$$ /tmp/syslog-ng.conf.$$
+   fi
+   #remote host
+   if echo "$1" | grep -q -E '^(none|[0-9a-zA-Z._-]+:[0-9]+;(tcp|udp))$'; then
+      grep -v "^[^#].*estination[( ]loghost[) ]" /tmp/syslog-ng.conf.$$ >/tmp/$$
+      if [ "$1" != "none" ]; then
+         echo "Using user specified remote log host: $1"
+         echo "$1" | sed -e 's/\(.*\):\(.*\);\(.*\)/destination loghost { \3("\1" port(\2)); };/' >>/tmp/$$
+         echo 'log { source(src); filter(f_loghost); destination(loghost); };' >>/tmp/$$
+         echo 'log { source(src_bbox); filter(f_loghost); destination(loghost); };' >>/tmp/$$
+      fi
+      mv /tmp/$$ /tmp/syslog-ng.conf.$$
+   fi
+
+   echo 'log { source(src_bbox); filter(f_bbox); destination(bbox_messages); };' >>/tmp/syslog-ng.conf.$$
+   echo 'log { source(src); filter(f_phone); destination(messages); };' >>/tmp/syslog-ng.conf.$$
+
+   # start cron and syslog-ng
+   /usr/bin/crontab -u root -l >/var/tmp/crontab
+   if ! grep -q mem-log /var/tmp/crontab; then
+      echo "$((RANDOM*60/32768)) 6,18 * * * nice -n 10 /usr/sbin/mem-log" | cat /var/tmp/crontab - | /usr/bin/crontab -u root -
+   fi
+   rm /var/tmp/crontab
+   if ! cmp -s /tmp/syslog-ng.conf.$$ /etc/syslog-ng.conf || ! killall -q -0 syslog-ng || ! killall -q -0 crond; then
+      cp /tmp/syslog-ng.conf.$$ /etc/syslog-ng.conf
+      killall -q -HUP syslog-ng || /usr/sbin/syslog-ng
+      killall -q crond
+      /usr/sbin/crond -b -S -l 9
+   fi
+}
+
+case "$1" in
+   start|"")
+      rm -f /dev/log
+      maxLogFileSizeInMegaBytes=`sed -n -e 's;maxLogFileSizeInMegaBytes=;;p' /nvdata/config/pphone.conf`
+      maxLogFileSizeInMegaBytes=${maxLogFileSizeInMegaBytes:-10}
+      maxLogFileSize=$((maxLogFileSizeInMegaBytes*1048576))
+      numLogFiles=`sed -n -e 's;numLogFiles=;;p' /nvdata/config/pphone.conf`
+      numLogFiles=${numLogFiles:-3}
+      threshold=$(($((maxLogFileSize*$((numLogFiles))))+$((maxLogFileSize/2))))
+      sizeMsgs=`stat -c '%s +' /var/log/messages* | sed -e '1s;^;0 ;' -e '$s;$; p;' | dc`
+      if [ ${sizeMsgs} -ge ${threshold} ]; then
+         trimSize=$((threshold-${maxLogFileSize}))
+         echo trimming /var/log/messages from ${sizeMsgs} to ${trimSize}
+         rm -f /var/tmp/messages*
+         unset fullList
+         for tailFile in /var/log/messages*; do
+            tailSize=`stat -c '%s' ${tailFile}`
+            if [ ${tailSize} -ge ${trimSize} ]; then
+               break;
+            fi
+            fullList="${tailFile} ${fullList}"
+            trimSize=$((trimSize-${tailSize}))
+         done
+         cat >/var/tmp/messages-awk <<EOF
+BEGIN {
+  logBase = ARGV[1]
+  logSize = ARGV[2]
+  if (logSize <= 4096)
+    logSize = 4096
+  logIndex = ARGV[3] - 1
+  if (logIndex < 0)
+    logIndex = 0
+  for (i = 1; i <= 3; i++)
+    ARGV[i] = ""
+  logFile = (logBase logIndex)
+  remaining = logSize
+}
+
+(NR != 1) {
+  remaining -= length(\$0) + 1
+  if ((logIndex > 0) && (remaining < 0)) {
+    close(logFile)
+    logIndex -= 1
+    logFile = (logBase logIndex)
+    remaining = logSize
+  }
+  print > logFile
+}
+EOF
+         # this is before the application is launched: there should be plenty of memory for /var/tmp
+         echo ${tailFile}:${trimSize} ${fullList}
+         tail -c ${trimSize} ${tailFile} | cat - ${fullList} | awk -f /var/tmp/messages-awk /var/tmp/messages. ${maxLogFileSize} ${numLogFiles}
+         rm -f /var/log/messages* /var/tmp/messages-awk
+         mv /var/tmp/messages.* /var/log/
+         mv /var/log/messages.0 /var/log/messages
+      fi
+      dd if=/dev/urandom of=/data/reserved count=256 2>/dev/null
+      syslog_ng_cron
+      ;;
+
+   stop)
+      killall -q -HUP syslog-ng && sleep 2 && sync && sleep 1 && sync && sleep 1
+      killall -q syslog-ng
+      killall -q crond
+      ;;
+
+   reload)
+      syslog_ng_cron "$2" "$3" "$4"
+      ;;
+
+   *)
+      echo "Usage $0 {start|stop|reload}" >&2
+      exit 1
+      ;;
+esac

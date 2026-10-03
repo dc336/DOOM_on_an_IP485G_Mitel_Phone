@@ -1,0 +1,6 @@
+#!/bin/sh
+
+echo "Initializing LCD..."
+
+lcdctl init_all
+lcdctl bl 1

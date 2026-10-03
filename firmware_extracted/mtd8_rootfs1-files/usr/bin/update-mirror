@@ -1,0 +1,91 @@
+#!/bin/ash
+# 
+# update-mirror [debug]
+#
+# ensure httpd open for 10 minutes (beyond the last observed connection)
+
+# re-invoke in the background
+if [ -z "${_updateMirrorBackgrounded}" ]; then
+  _updateMirrorBackgrounded=$$ exec $0 $@ & exit
+fi
+
+debugFlag=$1
+
+# mark in /var/tmp/update-mirror the earliest time to stop httpd, for use by the controlling update-mirror
+bumpByTen() {
+  invokedPlus10=`date +%s`
+  invokedPlus10=$((invokedPlus10+600))
+  echo ${invokedPlus10} >/var/tmp/update-mirror-secs-tmp
+  mv /var/tmp/update-mirror-secs-tmp /var/tmp/update-mirror-secs
+  [ -z "${debugFlag}" ] || echo $$ bumpByTen ${invokedPlus10}
+}
+
+bumpByTen
+
+# try to make this the controlling update-mirror
+if ! ln -s /dev/null/$$ /var/tmp/update-mirror-pid 2>/dev/null; then
+  origLinkedPid="`ls -l /var/tmp/update-mirror-pid | sed -e 's;.*/;;'`"
+  # fuzz delay
+  sleepSecs=$((10+$((RANDOM/1024))))
+  sleep ${sleepSecs}
+  currLinkedPid="`ls -l /var/tmp/update-mirror-pid | sed -e 's;.*/;;'`"
+  runningPid="`pidof update-mirror | sed -n -e "s;.*\(\<${currLinkedPid-empty_is_not_a_match}\>\).*;\1;p"`"
+  if [ -z "${runningPid}" -a "${currLinkedPid:-empty_is_not_a_match}" == "${origLinkedPid}" ]; then
+    # remove stale lock
+    rm -f /var/tmp/update-mirror-pid;
+    [ -z "${debugFlag}" ] || echo $$ slept ${sleepSecs} origLinkedPid ${origLinkedPid} currLinkedPid ${currLinkedPid} runningPid ${runningPid} stale lock removed
+  else
+    [ -z "${debugFlag}" ] || echo $$ slept ${sleepSecs} origLinkedPid ${origLinkedPid} currLinkedPid ${currLinkedPid} runningPid ${runningPid}
+  fi
+
+  # try to make this the controlling update-mirror one more time
+  if ! ln -s /dev/null/$$ /var/tmp/update-mirror-pid 2>/dev/null; then
+    logger -s -t update-mirror -p info "$$ yielding to `pidof update-mirror | tr ' ' '\n' | sort -u | grep -v $$ | tr '\n' ' '`"
+    exit
+  fi
+fi
+
+# this is the controlling update-mirror
+cleanup() {
+  logger -s -t update-mirror -p info "$$ cleanup"
+  httpdPID="`ps | grep "httpd -h /webroot" | grep -v grep | grep -oE "[0-9]+"`"
+  if [ -n "${httpdPID}" ]; then
+    kill -9 ${httpdPID} 2>/dev/null
+  fi
+  rm -f /var/tmp/update-mirror-*
+  exit
+}
+
+trap cleanup EXIT HUP INT TERM
+
+echo $PATH | tr : '\n' | sort >/var/tmp/update-mirror-$$-path
+cat <<EOF | comm -23 - /var/tmp/update-mirror-$$-path | tr '\n' : | sed -e 's;\(.*\):$;$PATH missing \1, required for backwards compatibility;' | logger -s -t update-mirror -p err 
+/bin
+/usr/bin
+/usr/sbin
+EOF
+while true; do
+  # launch httpd server if not running
+  (ps | grep "httpd -h /webroot" | grep -v grep) >/dev/null || { nice /usr/sbin/httpd -h /webroot && logger -s -t update-mirror -p info "$$ launched httpd"; }
+
+  # wait a minute
+  sleep 60
+
+  # check for port 80 activity
+  if netstat -t | grep -q :http; then
+    httpInUse=true
+  else
+    httpInUse=false
+  fi
+  [ -z "${debugFlag}" ] || echo $$ netstat httpInUse ${httpInUse}
+
+  if ${httpInUse}; then
+    # http in use: keep open 10 more minutes
+    bumpByTen
+  else
+    # check for 10 minute expiration
+    countdown=$((`cat /var/tmp/update-mirror-secs`-`date +%s`))
+    [ -z "${debugFlag}" ] || echo $$ countdown ${countdown}
+    [ ${countdown} -le 0 ] && { logger -s -t update-mirror -p info "$$ ten minutes of quiet"; exit; }
+  fi
+done

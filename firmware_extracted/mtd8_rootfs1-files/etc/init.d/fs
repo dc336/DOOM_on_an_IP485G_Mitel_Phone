@@ -1,0 +1,73 @@
+#!/bin/ash
+#
+# fs
+#
+# mount filesystem in rootfs
+#
+# uses ${bootbank}, ${ctrlmntn}, & ${partitions} from invoker, if available
+
+case "$1" in
+ start|"")
+  mount vartmp -t tmpfs /var/tmp        # not all mounts respect mode option 
+  rm -rf /data/var/run /data/var/lock   # treat as reboot-volatile without using tmpfs
+  chmod a+rwxt /var/tmp                 # not all mounts respect mode option
+
+  # from invoker, if available...
+  [ "${bootbank}" ] || bootbank=`sed -e 's;.*(rootfs\(.\)).*;\1;' /proc/cmdline`
+  [ "${ctrlmtdn}" ] || ctrlmtdn=`sed -n -e "s;mtd\([0-9]*\):.*\"ctrl${bootbank}\";\1;p" /proc/mtd`
+  [ "${partitions}" ] || partitions=`sed -n -e '8p' /dev/mtd${ctrlmtdn}`
+  # check for alt-boot (0) keyed data cleanup (#)
+  altbank=$((1-bootbank))
+  ctrldate=`head -1 /dev/mtd${ctrlmtdn}`
+  caltmtdn=`sed -n -e "s;mtd\([0-9]*\):.*\"ctrl${altbank}\";\1;p" /proc/mtd`
+  if [ "$caltmtdn" ]; then
+   caltdate=`head -1 /dev/mtd${caltmtdn}`
+   lastdate=`echo -e "${ctrldate}\\n${caltdate}" | sort | tail -1`
+   if [ "$ctrldate" != "$lastdate" ]; then
+    # prior alt-boot (0)
+    if grep -q '^[^0]*#[^0]*$' /proc/keypad/down; then
+     # just keyed data cleanup (#) -- alt-boot (0) already released
+     echo 1>&2 "observed # key down, deleting masking /data/ files"
+     # files and empty directories
+     find /data \! -type d | sed -e 's;^/data;;' | sort >/tmp/fs$$-rw
+     find ${partitions} | sed -e 's;^[^/]*;;' >/tmp/fs$$-ro
+     # merge in all candidate white-out names that can appear in /data
+     sed -e 's;\(.*/\)\(.*\);\1.wh.\2;' /tmp/fs$$-ro >/tmp/fs$$-wh
+     sed -e 's;[^/]*$;.wh.__dir_opaque;' /tmp/fs$$-ro >>/tmp/fs$$-wh
+     cat /tmp/fs$$-ro /tmp/fs$$-wh | sort -u >/tmp/fs$$-masking
+     comm -12 /tmp/fs$$-rw /tmp/fs$$-masking | sed -e 's;^;/data/;' >/tmp/fs$$-files
+     tr \\n \\0 </tmp/fs$$-files | xargs -s 1024 -r -0 -t rm -f
+     tr \\n \\0 </tmp/fs$$-files | xargs -s 1024 -r -0 -t echo 1>&2
+     sed -e 's;^\(/data/.*\)/[^/]*$;\1;p' /tmp/fs$$-files | sort -ru | tr \\n \\0 | xargs -r -0 -t rmdir 2>/dev/null
+     rm -f /tmp/fs$$-*
+    fi
+   fi
+  fi
+
+  # prior versions would set this file because the fs_start cleanup was not always unconditional
+  rm -f /data/fs-start-data-cleanup
+
+  # invoke partition-dependent fs start
+  for partition in ${partitions}; do
+   if [ -x /${partition}/etc/fs_start/${partition} ]; then
+    /${partition}/etc/fs_start/${partition}
+   fi
+  done
+  ;;
+
+ stop)
+  # remove any queued data files, e.g. masking data files from update-do
+  if [ -s /tmp/fs-stop-data-rm ]; then
+   grep '^/data.*[^/]$' /tmp/fs-stop-data-rm | tr \\n \\0 | xargs -r -0 -t rm -f
+   sed -n -e 's;^\(/data/.*\)/[^/]*$;\1;p' /tmp/fs-stop-data-rm | sort -ru | tr \\n \\0 | xargs -r -0 -t rmdir 2>/dev/null
+   touch /data/fs-start-data-cleanup
+  fi
+  sync
+  umount -l /var/tmp
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+esac

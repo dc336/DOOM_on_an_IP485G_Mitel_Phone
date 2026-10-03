@@ -1,0 +1,395 @@
+#!/bin/sh
+#
+# Network configuration utility
+# Copyright (c) 2010 ShoreTel
+#
+# Usage: netcfg [-q] [-d <dscp>] [-r <start>:<end>] [-i] [-p <pcp>]
+#               [-v <vlan>] [-s <dscp>] [-c <dscp>] [-u]
+#
+# Description: This utility configures the network layer for QoS and
+# VLAN settings required by the VOIP phone.
+#
+# -q : Show the current configuration and exit
+#
+# -d <dscp> : Set the DSCP value for RTP packets transmitted on the port range
+# specified.
+#
+# -r <start>:<end> : Set RTP port range that the DSCP value is applied to.
+#
+# -i : Initialize the Ethernet switch in the BCM11107 to prioritize the phone
+# traffic above all other traffic and create a default VLAN that all ports
+# are a member of.
+#
+# -p <pcp> : Configure the the 802.1p PCP for the phone's packets.
+#
+# -v <vlan> : Configure a VLAN for the phone's traffic and 802.1Q tag the
+# phone's packets on the LAN port.
+#
+# -s : Set the DSCP value for SIP signaling packets.
+#
+# -c : Set the DSCP value for CAS HTTP packets.
+#
+# -u : Set the phone's traffic to untagged without an 802.1Q header.
+
+# Interface name
+IFNAME=eth0
+
+# Interface MAC
+IFMAC=$(cat /sys/devices/virtual/net/$IFNAME/address)
+IFMAC=${IFMAC//:/-}
+
+# Path to Broadcom eth utility
+ETH=/bin/eth
+
+# Path to iptables
+IPTABLES=/sbin/iptables
+
+# Path to vconfig
+VCONFIG=/sbin/vconfig
+
+# Ethernet switch port numbers for eth
+PC_PORT=0
+LAN_PORT=1
+PHONE_PORT=8
+
+# Traffic class used by the bcmring_net Linux driver
+# for packets received by the switch from Linux
+PHONE_TC=7
+
+# Special MACs
+BPDU_MAC="01-80-c2-00-00-00"
+RESERVED_MAC="01-80-c2-00-00-0f"
+
+# SIP ports
+SIP_PORTS=5060:5061
+
+# CAS port
+CAS_PORTS=5447:5448
+
+# Check for eth
+if [ ! -x $ETH ]; then
+  echo >&2 "$ETH: command not found"
+  exit 1
+fi
+
+# Check for iptables
+if [ ! -x $IPTABLES ]; then
+  echo >&2 "$IPTABLES: command not found"
+  exit 1
+fi
+
+eth() {
+  $ETH $* 2>&1 > /dev/null
+}
+
+iptables() {
+  $IPTABLES $* 2>&1 > /dev/null
+}
+
+vconfig() {
+  $VCONFIG $* 2>&1 > /dev/null
+}
+
+usage() {
+  cat >&2 << EOF
+Usage: $0 [-q] [-i] [-d dscp] [-r start:end] [-p pcp] [-v vlan]
+       [-s dscp] [-c dscp] [-u]
+Options:
+    -q             Show the current configuration
+    -i             Initialize the network
+    -d dscp        Configure the RTP DSCP mark (0-63)
+    -r start:end   Set the RTP port range for DSCP marking
+    -p pcp         Configure the 802.1p PCP for all packets (0-7)
+    -v vlan        802.1Q tag all packets with the VLAN (0-4094)
+    -s dscp        Configure the SIP signaling DSCP mark (0-63)
+    -c dscp        Configure the CAS HTTP DSCP mark (0-63)
+    -u             Disable 802.1Q tagging of packets
+EOF
+  exit 1
+}
+
+if [ ! "$1" ]; then
+  usage
+fi
+
+# Parse the command line parameters
+while getopts qid:r:p:v:s:c:uh arg
+do
+  case $arg in
+    q) query=1;;
+    i) init=1;;
+    d) dscp="$OPTARG";;
+    r) ports="$OPTARG";;
+    p) pcp="$OPTARG";;
+    v) vlan="$OPTARG";;
+    s) sip="$OPTARG";;
+    c) cas="$OPTARG";;
+    u) untag=1;;
+    [\?h]) usage;;
+  esac
+done
+
+if [ "$pcp" ]; then
+  echo $pcp | grep -E "^[0-9]+$" > /dev/null
+  if [ $? -ne 0 ] || [ $pcp -lt 0 ] || [ $pcp -gt 7 ]; then
+    echo >&2 "Invalid PCP. PCP must be between 0-7"
+    exit 1 
+  fi
+fi
+
+if [ "$vlan" ]; then
+  echo $vlan | grep -E "^[0-9]+$" > /dev/null
+  if [ $? -ne 0 ] || [ $vlan -lt 0 ] || [ $vlan -gt 4094 ]; then
+    echo >&2 "Invalid VLAN. VLAN must be between 0-4094"
+    exit 1 
+  fi
+fi
+
+if [ "$ports" ]; then
+  start=${ports%:*}
+  echo $start | grep -E "^[0-9]+$" > /dev/null
+  if [ $? -ne 0 ] || [ $start -lt 1024 ] || [ $start -gt 65535 ]; then
+    echo >&2 "Invalid starting port. Port must be between 1024-65535"
+    exit 1 
+  fi
+  end=${ports#*:}
+  echo $end | grep -E "^[0-9]+$" > /dev/null
+  if [ $? -ne 0 ] || [ $end -lt 1024 ] || [ $end -gt 65535 ]; then
+    echo >&2 "Invalid ending port. Port must be between 1024-65535"
+    exit 1 
+  fi
+  if [ $start -ge $end ]; then
+    echo >&2 "Starting port must be less than ending port"
+    exit 1 
+  fi
+fi
+
+if [ "$dscp" ]; then
+  echo $dscp | grep -E "^[0-9]+$" > /dev/null
+  if [ $? -ne 0 ] || [ $dscp -lt 0 ] || [ $dscp -gt 63 ]; then
+    echo >&2 "Invalid DSCP. DSCP must be between 0-63"
+    exit 1 
+  fi
+  if [ "$dscp" ]; then
+    if [ ! "$start" ] || [ ! "$end" ]; then
+      echo >&2 "You must specify a port range for DSCP"
+      exit 1 
+    fi
+  fi
+fi
+
+if [ "$sip" ]; then
+  echo $sip | grep -E "^[0-9]+$" > /dev/null
+  if [ $? -ne 0 ] || [ $sip -lt 0 ] || [ $sip -gt 63 ]; then
+    echo >&2 "Invalid DSCP. DSCP must be between 0-63"
+    exit 1 
+  fi
+fi
+
+if [ "$cas" ]; then
+  echo $cas | grep -E "^[0-9]+$" > /dev/null
+  if [ $? -ne 0 ] || [ $cas -lt 0 ] || [ $cas -gt 63 ]; then
+    echo >&2 "Invalid DSCP. DSCP must be between 0-63"
+    exit 1 
+  fi
+fi
+
+# Get the current VLAN
+let "pbmp = (1 << $LAN_PORT) | (1 << $PC_PORT) | (1 << $PHONE_PORT)"
+pbmp=$(printf '0x%03x' $pbmp)
+result=$($ETH vlan table show | grep "pbmp=$pbmp" | grep "ubmp=0x000")
+if [ $? -eq 0 ]; then
+  let "cur_vlan=${result:1:5}"
+else
+  cur_vlan=0
+fi
+
+# Check if untagged
+if [ $cur_vlan -eq 0 ]; then
+  let "pbmp = (1 << $LAN_PORT) |(1 << $PC_PORT) | (1 << $PHONE_PORT)"
+  pbmp=$(printf '0x%03x' $pbmp)
+  result=$($ETH vlan table show | grep "^\[0x000\]" | grep "ubmp=$pbmp")
+  if [ $? -eq 0 ]; then
+    cur_untag=1
+  fi
+fi
+
+# Get the current PCP
+let "cur_pcp=$($ETH vlan port prio 8 \?)"
+
+# Get the current RTP DSCP and port range
+result=$($IPTABLES -t mangle --list | grep DSCP | grep "udp spts:")
+if [ $? -eq 0 ]; then
+  let "cur_dscp=${result#*set}"
+  cur_ports=${result#*spts:}
+  cur_ports=${cur_ports%DSCP*}
+else
+  cur_dscp="none"
+  cur_ports="none"
+fi
+
+# Get the current SIP DSCP
+result=$($IPTABLES -t mangle --list | grep DSCP | grep "tcp dpts:" | grep $SIP_PORTS)
+if [ $? -eq 0 ]; then
+  let "cur_sip=${result#*set}"
+else
+  cur_sip="none"
+fi
+
+# Get the current CAS DSCP
+result=$($IPTABLES -t mangle --list | grep DSCP | grep "tcp dpts:" | grep $CAS_PORTS)
+if [ $? -eq 0 ]; then
+  let "cur_cas=${result#*set}"
+else
+  cur_cas="none"
+fi
+
+if [ "$query" ]; then
+  if [ "$cur_untag" ]; then
+    echo "802.1Q VLAN : none"
+  else
+    echo "802.1Q VLAN : $cur_vlan"
+  fi
+  echo "802.1p PCP  : $cur_pcp"
+  echo "RTP DSCP    : $cur_dscp"
+  echo "RTP Ports   : $cur_ports"
+  echo "SIP DSCP    : $cur_sip"
+  echo "CAS DSCP    : $cur_cas"
+  exit 0
+fi
+
+# Initialize the Ethernet switch and iptables
+if [ "$init" ]; then
+  # Remove any leftover VLAN interfaces
+  for eth in `ls /proc/net/vlan | grep eth`; do
+    vconfig rem $(basename $eth)
+    eth arl table del $IFMAC ${eth#*.}
+  done
+
+  # Clear and add the interface MAC to the default VLAN
+  eth arl table clr
+  eth arl table add $IFMAC $PHONE_PORT 0 0 s
+
+  # Clear all output mangle rules
+  iptables -t mangle -F OUTPUT
+
+  # Classify all traffic to use the phone's traffic class as the skb priority
+  iptables -t mangle -A OUTPUT -j CLASSIFY --set-class 0:$PHONE_TC
+
+  # Set the Ethernet switch scheduler to strict priority
+  eth cosq sched s 0 0 0 0 
+
+  # Map phone TC to switch queue 3 (highest priority)
+  eth cosq map $PHONE_TC 3
+
+  # Initialize the VLAN module
+  eth vlan init
+
+  # Create all the VLAN entries
+  eth vlan table create all
+
+  # Add the LAN port to all VLANs
+  let "pbmp = (1 << $LAN_PORT)"
+  eth vlan table add all $pbmp 0
+
+  # Enable VLAN configuration
+  eth vlan en 1
+
+  # All ports belong to the default VLAN 
+  let "pbmp = (1 << $PC_PORT) | (1 << $LAN_PORT) | (1 << $PHONE_PORT)"
+  eth vlan table add 0 $pbmp $pbmp
+  eth vlan port vid $PC_PORT 0
+  eth vlan port vid $LAN_PORT 0
+  eth vlan port vid $PHONE_PORT 0
+
+  # Configure BPDU group MAC
+  eth bpdu addr $BPDU_MAC
+
+  # Add PC port to all VLANs with tagging
+  let "pbmp = (1 << $PC_PORT)"
+  eth vlan table add all $pbmp 0
+
+  # Don't tag PC port on VLAN 0
+  eth vlan table remove 0 $pbmp
+  eth vlan table add 0 $pbmp $pbmp
+  
+  # For BPDU pass, move the BPDU group MAC to a reserved IEEE address
+  eth bpdu addr $RESERVED_MAC
+fi
+
+# No VLAN if untagged
+if [ "$untag" ]; then
+  vlan=0
+fi
+
+# Configure the VLAN
+if [ "$vlan" ]; then
+  # Remove the phone from the current VLAN
+  if [ $cur_vlan -ne 0 ]; then
+    let "pbmp = (1 << $PHONE_PORT)"
+    eth vlan table remove $cur_vlan $pbmp
+    vconfig rem $IFNAME.$cur_vlan
+    eth arl table del $IFMAC $cur_vlan
+  fi
+
+  # Add the phone to the new VLAN
+  if [ $vlan -ne 0 ]; then
+    let "pbmp = 1 << $PHONE_PORT"
+    eth vlan table add $vlan $pbmp 0
+    vconfig add $IFNAME $vlan
+    eth arl table add $IFMAC $PHONE_PORT $vlan 0 s
+  fi
+
+  cur_vlan=$vlan
+
+  # Handle priority tagging
+  let "pbmp = (1 << $LAN_PORT)"
+  eth vlan table remove 0 $pbmp
+  if [ "$untag" ] || [ "$vlan" -ne 0 ]; then
+    eth vlan table add 0 $pbmp $pbmp
+  else
+    eth vlan table add 0 $pbmp 0
+  fi
+fi
+
+# Set the 802.1p PCP for phone traffic
+if [ "$pcp" ]; then
+  # Set the default PCP for untagged traffic
+  eth vlan port prio $PHONE_PORT $pcp
+
+  # Set the PCP from the skb priority if tagged traffic 
+  if [ $cur_vlan -ne 0 ]; then
+    vconfig set_egress_map eth0.$cur_vlan $PHONE_TC $pcp
+  fi
+  
+  cur_pcp=$pcp
+fi
+
+# Configure the RTP DSCP marking
+if [ "$dscp" ]; then
+  if [ "$cur_dscp" != "none" ]; then
+    iptables -t mangle -D OUTPUT -p udp --sport $cur_ports -j DSCP --set-dscp $cur_dscp
+  fi
+  iptables -t mangle -A OUTPUT -p udp --sport $ports -j DSCP --set-dscp $dscp
+fi
+
+# Configure the SIP DSCP marking
+if [ "$sip" ]; then
+  if [ "$cur_sip" != "none" ]; then
+    iptables -t mangle -D OUTPUT -p udp --dport $SIP_PORTS -j DSCP --set-dscp $cur_sip
+    iptables -t mangle -D OUTPUT -p tcp --dport $SIP_PORTS -j DSCP --set-dscp $cur_sip
+  fi
+  iptables -t mangle -A OUTPUT -p udp --dport $SIP_PORTS -j DSCP --set-dscp $sip
+  iptables -t mangle -A OUTPUT -p tcp --dport $SIP_PORTS -j DSCP --set-dscp $sip
+fi
+
+# Configure the CAS DSCP marking
+if [ "$cas" ]; then
+  if [ "$cur_cas" != "none" ]; then
+    iptables -t mangle -D OUTPUT -p udp --dport $CAS_PORTS -j DSCP --set-dscp $cur_cas
+    iptables -t mangle -D OUTPUT -p tcp --dport $CAS_PORTS -j DSCP --set-dscp $cur_cas
+  fi
+  iptables -t mangle -A OUTPUT -p udp --dport $CAS_PORTS -j DSCP --set-dscp $cas
+  iptables -t mangle -A OUTPUT -p tcp --dport $CAS_PORTS -j DSCP --set-dscp $cas
+fi
+

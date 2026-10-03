@@ -1,0 +1,51 @@
+#!/bin/ash
+if [ `id -u` -ne 0 ]; then
+ echo fthsplug must be invoked as root
+ echo Failure
+ exit 1
+fi
+PRODUCT_UC=$(sed -n -e 's;Product.*: ;;p' /proc/hardware)
+if [ "${PRODUCT_UC:$((${#PRODUCT_UC}-1))}" == "G" ]; then
+ # P8G P8CG
+ PRODUCT_MUXD=false
+else
+ # P2 P8
+ PRODUCT_MUXD=true
+ if grep -q -E 'Board Rev : (A|B|C)' /proc/hardware; then
+  muxhead=0
+ else
+  muxhead=1
+ fi
+fi
+RESULTCODE=0
+RESULTSTR=Success
+if ${PRODUCT_MUXD}; then
+ # save handset/headset mux state and set to headset
+ gpio get 33 >/tmp/fthsplug.33
+ gpio set 33 ${muxhead}
+ usleep 500000
+fi
+# /proc/headset only reflects status when /dev/headset0 is open
+mkfifo /tmp/fthsplug.fifo
+cat /tmp/fthsplug.fifo >/dev/headset0 &
+cat /proc/headset >/tmp/fthsplug.out
+catpid=`ps -o pid,ppid,comm | sed -n -e "s;^ *\([0-9]*\) *$$ *[0-9]* cat$;\1;p"`
+if [ "${catpid}" ]; then
+ kill ${catpid}
+else
+ echo '...commonly caused by failing to "ftenter" before "fthsplug".'
+fi
+if ! grep -q plugged /tmp/fthsplug.out; then
+ cat /tmp/fthsplug.out
+ RESULTCODE=1
+ RESULTSTR=Failure
+else
+ sed -n -e 's;.*unplugged.*;Inactive;p' -e 's;.*plugged.*;Off-Hook;p' /tmp/fthsplug.out
+fi
+if ${PRODUCT_MUXD}; then
+ # restore handset/headset mux state
+ gpio set 33 `cat /tmp/fthsplug.33`
+fi
+rm /tmp/fthsplug.*
+echo ${RESULTSTR}
+exit ${RESULTCODE}

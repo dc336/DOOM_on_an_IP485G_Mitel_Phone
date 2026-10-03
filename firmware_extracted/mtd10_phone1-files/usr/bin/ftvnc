@@ -1,0 +1,15 @@
+#!/bin/sh
+#
+# tunnel VNC from ethernet to localhost
+if [ -e /tmp/vncproxy ]; then
+  echo "VNC not mirrored, /tmp/vncproxy already exists"
+  exit 1
+fi
+ipaddr=`ip -family inet -oneline address show scope global | grep -v ' 169\.254\.0' | sort | tail -1 | sed -n -e '$s;.* inet \([0-9.]*\).*;\1;p'`
+if [ -z "$ipaddr" ]; then
+  echo "VNC not mirrored, can not determine ip address"
+  exit 1
+fi
+mkfifo /tmp/vncproxy
+cat /tmp/vncproxy | netcat -l ${ipaddr} 5900 | netcat 127.0.0.1 5900 >/tmp/vncproxy &
+echo "VNC mirrored at ${ipaddr}:5900"

@@ -1,0 +1,41 @@
+#!/bin/ash
+usage () {
+ echo 'Usage: ftbklt brighness'
+ echo '    brightness is percentage: 0 (off), 5 (dim), 100 (on)'
+ echo Failure
+ exit 1
+}
+checkresult () {
+ RESULT=$?
+ if [ ${RESULT} != 0 ]; then
+  echo Failure
+  exit ${RESULT}
+ fi
+}
+if [ $# != 1 ]; then
+ usage
+fi
+case $1 in
+ off)
+  BRIGHTNESS=0
+  ;;
+ dim)
+  BRIGHTNESS=2
+  ;;
+ on|bright|100)
+  BRIGHTNESS=31
+  ;;
+ [0-9]|[0-9][0-9])
+  BRIGHTNESS=$1
+  BRIGHTNESS=$(($(($((BRIGHTNESS*31))+30))/100))
+  ;;
+ *)
+  usage
+  ;;
+esac
+echo "echo ${BRIGHTNESS} >/sys/class/backlight/lcdfb-bl/brightness"
+usleep 10000
+echo ${BRIGHTNESS} >/sys/class/backlight/lcdfb-bl/brightness
+checkresult
+echo Success
+exit 0

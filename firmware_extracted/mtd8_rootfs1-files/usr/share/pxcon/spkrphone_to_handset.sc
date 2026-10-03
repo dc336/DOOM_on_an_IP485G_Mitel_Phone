@@ -1,0 +1,13 @@
+ecenable handset disable
+ecenable spkrphone disable
+dd spkrphone 0
+ad handset 0
+setgain spkrphone_mic -1000
+setgain spkrphone_spkr -1000
+setgain spkrphone_spkdig -1000
+setgain spkrphone_micdig  -1000
+setgain handset_mic 12
+setgain handset_micdig 0
+setgain handset_spkr -9
+setgain handset_spkdig 0
+ecenable handset enable

@@ -1,0 +1,375 @@
+#!/bin/ash
+PRODUCT_UC=$(sed -n -e 's;Product.*: ;;p' /proc/hardware)
+case ${PRODUCT_UC} in
+P2)
+  PRODUCT_MUXD=true
+  HEAD_HAND_FREQ_GEN=0
+  SPEAKER_FREQ_GEN=1
+  ;;
+P2G)
+  PRODUCT_MUXD=false
+  HEAD_HAND_FREQ_GEN=1
+  SPEAKER_FREQ_GEN=0
+  ;;
+P8)
+  PRODUCT_MUXD=true
+  HEAD_HAND_FREQ_GEN=0
+  SPEAKER_FREQ_GEN=1
+  ;;
+P8G)
+  PRODUCT_MUXD=false
+  HEAD_HAND_FREQ_GEN=0
+  SPEAKER_FREQ_GEN=1
+  ;;
+P8CG)
+  PRODUCT_MUXD=false
+  HEAD_HAND_FREQ_GEN=0
+  SPEAKER_FREQ_GEN=1
+  ;;
+*)
+  echo "Unknown Product ID"
+  exit 1
+  ;;
+esac
+
+usage () {
+ echo 'Usage: ftaudio [off|sidetone|duplex|tone] [all|hand|head|base] [freq|hand|head|base] [gain]'
+ echo '    freq is Hz'
+ echo '    optional gain is signed dB'
+ echo Failure
+ exit 1
+}
+checkresult () {
+ RESULT=$?
+ if [ ${RESULT} != 0 ]; then
+  echo Failure
+  exit ${RESULT}
+ fi
+}
+pxcon_more () {
+ PXCONJ=$(ps | sed -n -e "s;^ *\([0-9][0-9]*\)  *[^ ]* *pxcon /tmp/ftaudio.${PXCONLCSUFFIX}.in.*;\1;p")
+ if [ "${PXCONJ}" ]; then
+  usleep 250000
+  
+ else
+  echo "Error: cannot find pxcon for ${PXCONLCSUFFIX}"
+  echo Failure
+ fi
+}
+# defaults
+DESTS=$2
+SOURCE=$3
+case $1 in
+ off)
+  if [ $# != 2 ]; then
+   echo 'Note: "off" only valid with just destination'
+   usage
+  fi
+  ;;
+ sidetone)
+  if [ $# == 2 ]; then
+   SOURCE=${DESTS}
+  elif [ $# != 3 -a $# != 4 ]; then
+   usage
+  fi
+  ;;
+ duplex|tone)
+  if [ $# != 3 -a $# != 4 ]; then
+   usage
+  fi
+  ;;
+ *)
+  usage
+  ;;
+esac
+case $2 in
+ all)
+  if [ "$1" != "off" -a "$1" != "tone" ]; then
+   echo 'Note: "all" destination only valid with "off" or "tone"'
+   usage
+  fi
+  if ${PRODUCT_MUXD}; then
+   # MUXes hand & head
+   DESTS="hand base"
+   if [ "$1" != "off" ]; then
+    echo 'Note: "all" is just "hand" and "base" on '${PRODUCT_UC}
+   fi
+  else
+   DESTS="hand head base"
+  fi
+  ;;
+ hand|head)
+  if ${PRODUCT_MUXD} && [ "$1" == "off" ]; then
+   echo 'Note: "hand" or "head" turn both off on '${PRODUCT_UC}
+  fi
+  DESTS=$2
+  ;;
+ base)
+  DESTS=$2
+  ;;
+ *)
+  usage
+  ;;
+esac
+if [ $# == 3 -o $# == 4 ]; then
+ case $3 in
+  [0-9][0-9]|[0-9][0-9][0-9]|[0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9])
+   if [ "$1" != "tone" ]; then
+    echo 'Note: tone source only valid with "tone"'
+    usage
+   fi
+   FREQ=$3
+   SOURCE=$2
+   ;;
+  hand|head|base)
+   FREQ=
+   SOURCE=$3
+   if [ "$1" == "sidetone" ]; then
+    if [ "$2" != "$3" ]; then
+     echo 'Note: "sidetone" only valid with matching dest and source'
+     usage
+    fi
+   elif [ "$1" == "duplex" ]; then
+    if [ "$2" == "$3" ]; then
+     echo 'Note: "duplex" only valid with different dest and source'
+     usage
+    elif ${PRODUCT_MUXD} && [ "$2" != "base" -a "$3" != "base" ]; then
+     echo 'Note: "duplex" between "hand" and "head" not supported on '${PRODUCT_UC}
+     usage
+    fi
+   fi
+   ;;
+  *)
+   usage
+   ;;
+ esac
+fi
+if [ $# == 4 ]; then
+ case $4 in
+  -[0-9][0-9]|-[0-9]|[0-9]|[0-9][0-9])
+   GAIN=$4
+   ;;
+  *)
+   echo 'Note: gain must be a small signed integer'
+   usage
+   ;;
+ esac
+else
+ GAIN=0
+fi
+for DEST in ${DESTS}; do
+ # on all but P8xG, head & hand are MUXed [referred to here as muxd]
+ if ! ${PRODUCT_MUXD}; then
+  PXCONLCSUFFIX=${DEST}
+ elif [ "${DEST}" == "base" ]; then
+  PXCONLCSUFFIX=${DEST}
+ else
+  PXCONLCSUFFIX=muxd
+ fi
+ PXCONUCSUFFIX=$(echo ${PXCONLCSUFFIX} | tr a-z A-Z)
+ case ${PXCONLCSUFFIX} in
+  hand|muxd)
+   PXCONPREFIX=handset
+   ;;
+  head)
+   PXCONPREFIX=headset
+   ;;
+  base)
+   PXCONPREFIX=spkrphone
+   ;;
+ esac
+
+ MICGAIN=0
+ if ${PRODUCT_MUXD}; then
+   MICGAIN=10
+   if [ "${SOURCE}" != "base" ]; then
+     SOURCE=muxd
+   fi
+ fi
+
+ case ${SOURCE} in
+  hand|muxd)
+   PXCONSRCPREFIX=handset
+   if [ ${PXCONPREFIX} == "headset" ]; then
+	  PXCONSILENT=spkrphone
+   else
+	  PXCONSILENT=headset
+   fi
+   ;;
+  head)
+   PXCONSRCPREFIX=headset
+   if [ ${PXCONPREFIX} == "handset" ]; then
+	  PXCONSILENT=spkrphone
+   else
+	  PXCONSILENT=handset
+   fi
+   ;;
+  base)
+   PXCONSRCPREFIX=spkrphone
+   if [ ${PXCONPREFIX} == "handset" ]; then
+	  PXCONSILENT=headset
+   else
+	  PXCONSILENT=handset
+   fi
+   ;;
+ esac
+
+
+
+ # handle actions
+ if [ "$1" == "off" ]; then
+   echo Stopping pxcon for ${DEST}
+   sed -e 's;^q;;p' /tmp/ftaudio.${PXCONLCSUFFIX}.init > /tmp/ftaudio.${PXCONLCSUFFIX}.off
+   echo setgain ${PXCONPREFIX}_spkr -1000 >> /tmp/ftaudio.${PXCONLCSUFFIX}.off
+   echo setgain ${PXCONPREFIX}_mic -1000 >> /tmp/ftaudio.${PXCONLCSUFFIX}.off
+   echo setgain ${PXCONPREFIX}_sidetone -1000 >> /tmp/ftaudio.${PXCONLCSUFFIX}.off
+   echo q >> /tmp/ftaudio.${PXCONLCSUFFIX}.off
+   cat /tmp/ftaudio.${PXCONLCSUFFIX}.off
+   pxcon /tmp/ftaudio.${PXCONLCSUFFIX}.off 
+   pxcon_more
+  rm -f /tmp/ftaudio.${PXCONLCSUFFIX}.*
+  # double-kill
+  PXCONJ=$(ps | sed -n -e "s;^ *\([0-9][0-9]*\)  *[^ ]* *pxcon /tmp/ftaudio.${PXCONLCSUFFIX}.in.*;\1;p")
+  if [ "${PXCONJ}" ]; then
+   kill ${PXCONJ}
+  fi
+  if [ "${DEST}" == "base" ]; then
+   echo 0 > /proc/sys/apm/sine_freq${SPEAKER_FREQ_GEN}
+  else
+   case ${DEST} in 
+      hand)
+	  PXCONJ=$(ps | sed -n -e "s;^ *\([0-9][0-9]*\)  *[^ ]* *pxcon /tmp/ftaudio.head.in.*;\1;p")
+	  if ! [ "${PXCONJ}" ]; then
+	     echo 0 > /proc/sys/apm/sine_freq${HEAD_HAND_FREQ_GEN}
+	  fi
+      ;;
+      head)
+	  PXCONJ=$(ps | sed -n -e "s;^ *\([0-9][0-9]*\)  *[^ ]* *pxcon /tmp/ftaudio.hand.in.*;\1;p")
+	  if ! [ "${PXCONJ}" ]; then
+	     echo 0 > /proc/sys/apm/sine_freq${HEAD_HAND_FREQ_GEN}
+	  fi
+      ;;
+      muxd)
+  	    echo 0  > /proc/sys/apm/sine_freq${HEAD_HAND_FREQ_GEN}
+      ;;    
+    esac
+ fi 
+ else
+  #
+  # pxcon launched with a file argument with bg in the last line to put pxcon in the background
+  # append to the file to stage more pxcon work [terminated by bg or q], then bring pxcon into the foreground
+  #
+  PXCONJ=$(ps | sed -n -e "s;^ *\([0-9][0-9]*\)  *[^ ]* *pxcon /tmp/ftaudio.${PXCONLCSUFFIX}.in.*;\1;p")
+  if ! [ "$PXCONJ" ]; then
+   cat <<"EOF" | sed -e "s;PXCONPREFIX;${PXCONPREFIX};" >/tmp/ftaudio.${PXCONLCSUFFIX}.init
+start 0 0 0
+setpower full
+getgain PXCONPREFIX_spkr
+getgain PXCONPREFIX_mic
+getgain PXCONPREFIX_sidetone
+q
+EOF
+   cat <<"EOF" >/tmp/ftaudio.${PXCONLCSUFFIX}.in
+start 0 0 0
+setpower full
+bg
+EOF
+   pxcon /tmp/ftaudio.${PXCONLCSUFFIX}.init | tee /tmp/ftaudio.${PXCONLCSUFFIX}.out
+   nohup pxcon /tmp/ftaudio.${PXCONLCSUFFIX}.in &
+   # save original gain values
+   sed -e 's;^Gain;@Gain;' -e '$s;$;@;' /tmp/ftaudio.${PXCONLCSUFFIX}.out | tr '\n@' ' \n' | \
+     sed -n -e 's;Gain information for block=\([^ ]*\) .*: currentdb=\([^ ]*\) .*;setgain \1 \2;p' >/tmp/ftaudio.${PXCONLCSUFFIX}.setgains
+   if [ ${PXCONPREFIX} == "headset" ]; then
+     sed -i -e 's;handset_;headset_;' /tmp/ftaudio.${PXCONLCSUFFIX}.setgains
+   fi
+   sed -e "s;setgain ${PXCONPREFIX}\([^ ]*\) \([^ ]*\);${PXCONLCSUFFIX}\1=\2;" -e 's;-1000;0;' /tmp/ftaudio.${PXCONLCSUFFIX}.setgains | \
+     tr a-z A-Z >/tmp/ftaudio.${PXCONLCSUFFIX}.baseline
+  fi
+
+  # set gain shell environment variables
+  . /tmp/ftaudio.${PXCONLCSUFFIX}.baseline
+
+  case $1 in
+   sidetone)
+    echo "setgain ${PXCONSILENT}_spkr -1000" > /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONSILENT}_mic -1000" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONPREFIX}_sidetone $((GAIN))" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONPREFIX}_spkr $((GAIN/4+$(eval echo \$${PXCONUCSUFFIX}_SPKR)))" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONPREFIX}_mic  ${MICGAIN}" >>/tmp/ftaudio.${PXCONLCSUFFIX}.stage
+	echo bg >>/tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    cat /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    # append atomically
+    (flock -s 200; cat /tmp/ftaudio.${PXCONLCSUFFIX}.stage >>/tmp/ftaudio.${PXCONLCSUFFIX}.in) 200>>/tmp/ftaudio.${PXCONLCSUFFIX}.in
+    pxcon_more
+    ;;
+   duplex)
+    # split gain among input and output, analog and digital
+    echo "mdisconall halaudio_${PXCONSRCPREFIX}_mixp halaudio_${PXCONSILENT}_mixp" > /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "mdisconall halaudio_${PXCONPREFIX}_mixp halaudio_${PXCONSILENT}_mixp" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONSILENT}_spkr -1000" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONSILENT}_mic -1000" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "mcon halaudio_${PXCONSRCPREFIX}_mixp halaudio_${PXCONPREFIX}_mixp mono" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONPREFIX}_spkr $((GAIN/4+$(eval echo \$${PXCONUCSUFFIX}_SPKR)))" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONPREFIX}_mic -1000" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONPREFIX}_sidetone -50" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONSRCPREFIX}_spkr -1000" >>/tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONSRCPREFIX}_mic ${MICGAIN}" >>/tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo "setgain ${PXCONSRCPREFIX}_sidetone -50" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    echo bg >>/tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    cat /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    # append atomically
+    (flock -s 200; cat /tmp/ftaudio.${PXCONLCSUFFIX}.stage >>/tmp/ftaudio.${PXCONLCSUFFIX}.in) 200>>/tmp/ftaudio.${PXCONLCSUFFIX}.in
+    pxcon_more
+    ;;
+   tone)
+    # split gain among analog and digital
+    echo "setgain ${PXCONPREFIX}_spkr $((GAIN/2+$(eval echo \$${PXCONUCSUFFIX}_SPKR)))" > /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+	if [ "${PXCONSILENT}" ]; then
+	    echo "setgain ${PXCONSILENT}_spkr -1000" >> /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    fi
+    echo bg >>/tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    cat /tmp/ftaudio.${PXCONLCSUFFIX}.stage
+    # append atomically
+    (flock -s 200; cat /tmp/ftaudio.${PXCONLCSUFFIX}.stage >>/tmp/ftaudio.${PXCONLCSUFFIX}.in) 200>>/tmp/ftaudio.${PXCONLCSUFFIX}.in
+    pxcon_more
+    if [ "${DEST}" == "base" ]; then
+     echo "echo ${FREQ} > /proc/sys/apm/sine_freq${SPEAKER_FREQ_GEN}"
+     echo ${FREQ} > /proc/sys/apm/sine_freq${SPEAKER_FREQ_GEN}
+    else
+     echo "echo ${FREQ} > /proc/sys/apm/sine_freq${HEAD_HAND_FREQ_GEN}"
+     echo ${FREQ} > /proc/sys/apm/sine_freq${HEAD_HAND_FREQ_GEN}
+    fi
+    ;;
+  esac
+  if ${PRODUCT_MUXD}; then
+   if grep -q -E 'Board Rev : (A|B|C)' /proc/hardware; then
+    muxhand=1
+    muxhead=0
+   else
+    muxhand=0
+    muxhead=1
+   fi
+  fi
+  if [ "${PXCONLCSUFFIX}" == "muxd" ]; then
+   if [ "${DEST}" == "hand" ]; then
+    echo "gpio output 33 ${muxhand}"
+    gpio output 33 ${muxhand}
+   else
+    echo "gpio output 33 ${muxhead}"
+    gpio output 33 ${muxhead}
+   fi
+  elif ${PRODUCT_MUXD}; then
+   if [ "$1" == "duplex" ]; then
+    if [ "$3" == "hand" ]; then
+     echo "gpio output 33 ${muxhand}"
+     gpio output 33 ${muxhand}
+    else
+     echo "gpio output 33 ${muxhead}"
+     gpio output 33 ${muxhead}
+    fi
+   fi
+  fi
+ fi
+done
+echo Success
+exit 0

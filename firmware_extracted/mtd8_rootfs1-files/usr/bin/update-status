@@ -1,0 +1,70 @@
+#!/bin/ash
+# 
+# update-status
+
+firmwarestatusevent() {
+ if [ -S /tmp/cli_interface_socket ]; then
+  echo firmwarestatusevent $@ | netcat -U /tmp/cli_interface_socket 2>&1 >/dev/null
+ fi
+}
+
+report_download=false
+currbank=`sed -n -e 's;.*rootfs\([01]\).*;\1;p' /proc/cmdline`
+state=0
+if ! [ "$currbank" ]; then
+ logger -s -t update-status -p err 'Internal failure: cannot determine bank from cmdline'
+ state=-7
+fi
+if [ $state -eq 0 ]; then
+ nextbank=$((1-currbank))
+ for updatefile in /etc/update/version$nextbank /etc/update/ctrl$nextbank.staged /etc/update/manifest$nextbank; do
+  if ! [ -s ${updatefile} ]; then
+   logger -s -t update-status -p info "${updatefile} is missing, no update staged"
+   state=-8
+  fi
+ done
+fi
+if [ $state -eq 0 ]; then
+ if [ -e /etc/update/update-staged ]; then
+  # update-stage since last update-do
+  report_download=true;
+ fi
+ # ensure /dev/ubi0_n exists
+ mdev -s 2>/dev/null
+ # manifest contains volume names of update
+ findnames=`sed -e "s;\t.*;$nextbank;" /etc/update/manifest$nextbank`
+ # validate manifest
+ for voln in `/usr/sbin/mtd-utils/ubinfo /dev/ubi0 | sed -n -e 's;^Present volumes: *\(.*\)$;\1;p' | tr -d ,`; do
+  name=`/usr/sbin/mtd-utils/ubinfo /dev/ubi0_$voln | sed -n -e "s;^Name: *\(.*\);\1;p"`
+  # remove volume from the manifest, if it exists
+  findnames=`echo $findnames | sed -e "s;\<$name\> *;;"`
+ done
+ if [ "$findnames" ]; then
+  logger -s -t update-status -p err "ubinfo failed to find $findnames, corrupt update"
+  state=-9
+ fi
+fi
+version=`cat /etc/update/version$nextbank`
+if [ -z "${version}" ]; then
+ version=0.0.0.0
+ logger -s -t update-status -p err "/etc/update/version$nextbank missing"
+ state=-10
+elif ! [ -h /webroot/phones/${version} ]; then
+ logger -s -t update-status -p err "/webroot/phones/${version} missing"
+ state=-11
+fi
+if [ $state -eq 0 ]; then
+ if ${report_download}; then
+  firmwarestatus="DownloadReady ${version} 100"
+ else
+  firmwarestatus="FirmwareReport ${version} 100"
+ fi
+else
+ if ${report_download}; then
+  firmwarestatus="DownloadFailed ${version} $state"
+ else
+  firmwarestatus="FirmwareReport"
+ fi
+fi
+logger -s -t update-status -p info "Current Version `awk '{ print $1 }' /etc/issue`; Alternate Bank ${firmwarestatus}"
+firmwarestatusevent ${firmwarestatus}

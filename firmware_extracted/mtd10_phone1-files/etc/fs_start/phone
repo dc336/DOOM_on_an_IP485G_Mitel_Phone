@@ -1,0 +1,10 @@
+#!/bin/ash
+# ensure /data directories exist for the operations below
+mkdir -p /data/nvdata
+
+# group forced, can write
+chmod 2775 /data/nvdata
+
+# root:phone
+chown -R root:phone /data/nvdata
+chmod -R g+w /data/nvdata

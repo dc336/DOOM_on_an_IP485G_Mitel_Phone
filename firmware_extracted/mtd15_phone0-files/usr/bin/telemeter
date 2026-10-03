@@ -1,0 +1,159 @@
+#!/bin/ash
+mkdir -p /etc/telemeter /tmp/telemeter
+# /etc/telemeter/ holds
+#   ip-address  prior ip address
+#   boot-epoch	prior boot time
+#   location    country,state,city,zip
+
+cli -c 'getdm PPhoneDM.system'      2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/system.dm 2> /dev/null 
+NEWRELICKEY=`sed -n -e 's;^[[:space:]]*PPhoneDM\.system.newRelicKey *= *\(.*\);\1;p' /tmp/telemeter/system.dm`
+if [ -z "${NEWRELICKEY}" -o "${NEWRELICKEY}" == "none" -o "${NEWRELICKEY}" == "off" ]; then
+  exit 1
+fi
+cli -c 'getdm PPhoneDM.audio'       2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/audio.dm 2> /dev/null 
+cli -c 'getdm PPhoneDM.cas'         2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/cas.dm 2> /dev/null 
+cli -c 'getdm PPhoneDM.casstatusdm' 2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/casstatus.dm 2> /dev/null 
+cli -c 'getdm PPhoneDM.netstatus'   2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/netstatus.dm 2> /dev/null 
+cli -c 'getdm PPhoneDM.progbuttons' 2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/buttons.dm 2> /dev/null 
+cli -c 'getdm PPhoneDM.security'    2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/security.dm 2> /dev/null 
+cli -c 'getdm PPhoneDM.sip'         2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/sip.dm 2> /dev/null 
+cli -c 'getdm PPhoneDM.sky'         2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/sky.dm 2> /dev/null 
+cli -c 'getdm PPhoneDM.sysstatus'   2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/sysstatus.dm 2> /dev/null 
+cli -c 'getdm PPhoneDM.user'        2>&- > /tmp/telemeter/dm ; cat /tmp/telemeter/dm | sed -n '/^[-\t ]/p' | sed -e 's/^->//' -e 's;\([^ \t]\);PPhoneDM\.\1;' > /tmp/telemeter/user.dm 2> /dev/null 
+
+echo -e '[\n{\n  "eventType" : "PhoneSession",' >/tmp/telemeter/new
+echo -e '  "telemeterVersion" : "2.0",' >>/tmp/telemeter/new
+sed -n -e 's;.*;  "MAC" : "&",;p' /proc/manuf/macAddress >>/tmp/telemeter/new
+sed -n -e 's;.*;  "SerialNumber" : "&",;p' /proc/manuf/serialNumber >>/tmp/telemeter/new
+cat /proc/manuf/manufYear /proc/manuf/manufWeek /proc/manuf/manufCode | sed -e 'NNs;\(..\)\n\(..\)\n\(..\);  "ManufactureDate" : "20\1 W\2 \3",;' >> /tmp/telemeter/new
+HQCAROOTCERT=`sed -n -e 's;^[[:space:]]*PPhoneDM\.security\.hqCARootCert *= *\(.*\);\1;p' /tmp/telemeter/security.dm`
+if [ -z "${HQCAROOTCERT}" ]; then
+  # No Root Cert.  Look for Sky Domain instead.
+  sed -n -e 's;^[[:space:]]*PPhoneDM\.sky\.casURL  *=.*//\([^/][^/]*\).*;  "HQFingerprint" : "\1",;p' /tmp/telemeter/sky.dm >>/tmp/telemeter/new
+else
+  echo -e "-----BEGIN CERTIFICATE-----\n$HQCAROOTCERT\n-----END CERTIFICATE-----" | \
+  sed -e 's;.................................................................;&\n;g' | \
+  openssl x509 -noout -fingerprint | \
+  sed -n -e 's;SHA1 Fingerprint=\(.*\);  "HQFingerprint" : "\1",;p' >>/tmp/telemeter/new
+fi
+sed -n -e 's;^\([0-9.]*\).*;  "FirmwareVersion" : "\1",;p' /etc/issue >>/tmp/telemeter/new
+
+IP_ADDR=`sed -n -e 's;^[[:space:]]*PPhoneDM\.netstatus\.appIpAddress  *= *\(.*\);\1;p' /tmp/telemeter/netstatus.dm`
+IP_PRIOR=`cat /etc/telemeter/ip-address 2>/dev/null`
+IPGWADDR=`sed -n -e 's;^[[:space:]]*PPhoneDM\.netstatus\.netGatewayAddress  *= *\(.*\);\1;p' /tmp/telemeter/netstatus.dm`
+
+IP_DIFFERENT=true
+if [ "${IP_PRIOR}" -a "${IP_PRIOR}" == "${IP_ADDR}" ]; then
+ IP_DIFFERENT=false
+fi
+if ${IP_DIFFERENT}; then
+ echo ${IP_ADDR} > /etc/telemeter/ip-address
+fi
+
+echo "  \"IP\" : \"${IP_ADDR}\"," >>/tmp/telemeter/new
+sed -n -e 's;.*;  "Model" : "&",;p' /proc/manuf/model >>/tmp/telemeter/new
+
+#sed -n -e 's;^[[:space:]]*PPhoneDM\.user\.DID *= *\(.*\);  "DID" : "\1",;p' /tmp/telemeter/user.dm >>/tmp/telemeter/new
+sed -n -e 's;^[[:space:]]*PPhoneDM\.sip\.sipExtension *= *\(.*\);  "DN" : "\1",;p' /tmp/telemeter/sip.dm >>/tmp/telemeter/new
+sed -n -e 's;.*;  "Timezone" : "&",;p' /etc/TZ >>/tmp/telemeter/new
+sed -n -e 's;LANG=\([^.]*\).*;  "Language" : "\1",;p' /etc/locale.conf >>/tmp/telemeter/new
+
+sed -n -e 's;^[[:space:]]*PPhoneDM\.audio\.[A-Za-z]*Volume  *= *\(.*\);\1;p' /tmp/telemeter/audio.dm | sed -e ':a' -e '$!N; s/\n/,/; ta' | sed -n -e 's;^\(.*\)$;  \"VolumesHaRiSpHe\" \: \"\1\",;p' >>/tmp/telemeter/new
+sed -n -e 's;^[[:space:]]*PPhoneDM\.user\.user[A-Za-z]*Name  *= *\(.*\);\1;p' /tmp/telemeter/user.dm | sed -e ':a' -e '$!N; s/\n/ /; ta' | sed -n -e 's;^\(.*\)$;  \"FLName\" \: \"\1\",;p' >>/tmp/telemeter/new
+DM_SOFTWARE=`sed -n -e 's;^[[:space:]]*PPhoneDM\.sysstatus\.software  *= *\(.*\);\1;p' /tmp/telemeter/sysstatus.dm | tr [a-z] [A-Z]`
+DM_PHONEMODEL=`sed -n -e 's;^[[:space:]]*PPhoneDM\.sysstatus\.phoneModel  *= *\(.*\);\1;p' /tmp/telemeter/sysstatus.dm`
+DM_HWREV=`sed -n -e 's;^[[:space:]]*PPhoneDM\.sysstatus\.hardwareRevision  *= *\(.*\);Rev-\1;p' /tmp/telemeter/sysstatus.dm`
+echo "  \"PhoneHW\" : \"$DM_SOFTWARE $DM_HWREV\"," >> /tmp/telemeter/new
+
+VPN=`sed -n -e 's;^[[:space:]]*PPhoneDM\.netstatus\.vpnConnected *= *\(.*\);\1;p'  /tmp/telemeter/netstatus.dm`
+sed -n -e 's;^[[:space:]]*PPhoneDM\.netstatus\.vpnConnected *= *\(.*\);  "VPN" : "\1",;p' /tmp/telemeter/netstatus.dm >>/tmp/telemeter/new
+sed -n -e 's;^[[:space:]]*PPhoneDM\.sip\.sipServerIp *= *\(.*\);  "SIP" : "\1",;p' /tmp/telemeter/sip.dm >>/tmp/telemeter/new
+sed -n -e 's;^[[:space:]]*PPhoneDM\.casstatusdm\.currentlyConnectedServer *= *\(.*\);  "ConnectedServer" : "\1",;p' /tmp/telemeter/casstatus.dm >>/tmp/telemeter/new
+sed -n -e 's;^[[:space:]]*PPhoneDM\.sky\.domain *= *\(.*\);  "CloudDomain" : "\1",;p' /tmp/telemeter/sky.dm >>/tmp/telemeter/new
+
+# "SIPSessionStart": Timestamp  Time of last SIPSession begin â€¦ 0 if not connected
+# "RegFQDN": String     Registration FQDN
+case "`sed -n -e 's;^[[:space:]]*PPhoneDM\.sip\.state *= *\(.*\);\1;p' /tmp/telemeter/sip.dm`" in
+ "0")
+ echo "  \"SIPState\" : \"Initialized\"," >>/tmp/telemeter/new
+ ;;
+ "1"|"2")
+ echo "  \"SIPState\" : \"Registering\"," >>/tmp/telemeter/new
+ ;;
+ "3")
+ echo "  \"SIPState\" : \"Registered\"," >>/tmp/telemeter/new
+ ;;
+ *)
+ ;;
+esac
+
+# this next item should change once a day forcing a report
+[ -e /tmp/telemeter/daysup ] && mv -f /tmp/telemeter/daysup /tmp/telemeter/daysup.old
+expr `sed -n -e 's;\([0-9]*\).*;\1;p' /proc/uptime` / 86400 | sed -n -e 's;.*;  "UptimeDays" : &,;p' > /tmp/telemeter/daysup
+cat /tmp/telemeter/daysup  >>/tmp/telemeter/new
+BOOT_EPOCH=$((`date +%s`-`sed -e 's;\..*;;' /proc/uptime`))
+BOOT_PRIOR=`cat /tmp/boot-epoch 2>/dev/null`
+BOOT_DIFFERENT=true
+if [ "${BOOT_PRIOR}" ]; then
+ if [ ${BOOT_PRIOR} -ne ${BOOT_EPOCH} ]; then
+  BOOT_EPOCH_MINUS=$((BOOT_EPOCH-30))
+  BOOT_EPOCH_PLUS=$((BOOT_EPOCH+30))
+  if [ ${BOOT_EPOCH_MINUS} -le ${BOOT_PRIOR} -a ${BOOT_PRIOR} -le ${BOOT_EPOCH_PLUS} ]; then
+   # this is close enough, don't change it
+   BOOT_EPOCH=${BOOT_PRIOR}
+   BOOT_DIFFERENT=false
+  fi
+ fi
+fi
+if ${BOOT_DIFFERENT}; then
+ echo ${BOOT_EPOCH} > /tmp/boot-epoch
+fi
+# This is not comma terminated, in case it's last...
+echo "  \"LastBootUnix\" : ${BOOT_EPOCH}," >>/tmp/telemeter/new
+echo "  \"LastBoot\" : \"`date -d @${BOOT_EPOCH} +%F_%T`\"," >>/tmp/telemeter/new
+
+# any change
+if [ "${NEWRELICKEY}" != "`cat /tmp/telemeter/key`" ] || ! cmp -s /tmp/telemeter/new /tmp/telemeter/old; then
+  if nslookup insights-collector.newrelic.com 2>/tmp/telemeter/nslookup >/dev/null; then
+    # calculate and append uptime and change flags -- these don't particpate in change triggering
+    UPTIME_SECONDS=`sed -n -e 's;\([0-9]*\).*;\1;p' /proc/uptime`
+    if [ -e /tmp/telemeter/old ]; then
+      FLAGS=`diff /tmp/telemeter/old /tmp/telemeter/new | sed -n -e 's;^+[^\"]*\"\([^\"]*\)\".*$;\1;p' | xargs | sed -e 's/ /|/g'`
+    else
+      # if there is no old telemeter and we are under 9 minutes uptime, consider this a reboot
+      if [ $UPTIME_SECONDS -lt "540" ]; then
+        FLAGS=Reboot
+      else
+        FLAGS=Null
+      fi
+    fi
+    cp /tmp/telemeter/new /tmp/telemeter/dyn
+    echo >> /tmp/telemeter/dyn "  \"UptimeSeconds\" : ${UPTIME_SECONDS},"
+    echo >> /tmp/telemeter/dyn "  \"ChangeFlags\" : \"${FLAGS}\""
+    echo >> /tmp/telemeter/dyn -e '}\n]'
+
+    # post to New Relic
+    curl \
+      < /tmp/telemeter/dyn \
+      --capath /usr/lib/ssl/certs/ \
+      -d @- \
+      -X POST \
+      -H "Content-Type: application/json" \
+      -H "X-Insert-Key: ${NEWRELICKEY}" \
+      -i \
+      https://insights-collector.newrelic.com/v1/accounts/541961/events 2>&1 >/tmp/telemeter/curl
+    STATUS=$?
+    if [ ${STATUS} -ne 0 ]; then
+      logger -t telemeter "curl to insights-collector.newrelic.com exit code ${STATUS}"
+    fi
+    if [ -s /tmp/telemeter/curl ] && ! grep '{"success":true}' /tmp/telemeter/curl; then
+      tr '\n' ' ' </tmp/telemeter/curl | logger -t telemeter 
+    fi
+  else
+    # report lookup failure
+    logger -t telemeter </tmp/telemeter/nslookup
+  fi
+  # one shot attempt -- don't retry until something changes
+  echo "${NEWRELICKEY}" >/tmp/telemeter/key
+  mv /tmp/telemeter/new /tmp/telemeter/old
+fi

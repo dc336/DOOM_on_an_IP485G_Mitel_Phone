@@ -1,0 +1,28 @@
+echo "$1 interface status change detected - $2"
+
+STATUS=$2
+
+if [ "$STATUS" = "up" ]; then
+  ifconfig $1 0.0.0.0 up
+
+  model=`sed -n -e 's;\(.*\);\1;p' /proc/manuf/model`
+  firmware=`sed -n -e 's;[^#]*#\([0-9.a-zA-Z]*\).*;\1;p' /proc/version`
+  software=`sed -n -e 's;\([^ ][0-9.a-zA-Z]\+\).*;\1;p' /etc/issue`
+  rev=`sed -n -e 's;\([0-9]\+\).*;\1;p' /proc/manuf/hwCompatibility`
+  desc="ShoreTel $model Kernel Version: $firmware Software Version: $software HW Revision: $rev"
+
+  killall -q lldpd
+  rm -f /var/run/lldpd.*
+  /bin/mkdir -p /var/run/lldpd
+  /usr/sbin/lldpd -S "$desc" &
+
+  #give time for p8cg to complete setup steps for new usbnet interface
+  killall udhcpc
+  sleep 7
+  /usr/sbin/udhcpc -b -i $1 -s /usr/share/udhcpc/default.script
+else
+  ifconfig $1 down
+fi
+
+#ifplugd -i $1 -f -a -M -I -r /etc/ifusb-bb
+exit 0

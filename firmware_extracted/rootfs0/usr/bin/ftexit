@@ -1,0 +1,12 @@
+#!/bin/ash
+if_setup.sh down
+if_setup.sh reconfig
+if [ -s /tmp/ftkbdiag.console_loglevel ]; then
+ ftkbdiag off
+fi
+if [ -s /tmp/ftenter.status ]; then
+ . /tmp/ftenter.status &
+fi
+rm -f /tmp/ftenter.status
+echo Success
+exit 0

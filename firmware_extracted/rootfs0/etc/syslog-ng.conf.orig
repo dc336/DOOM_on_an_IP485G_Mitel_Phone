@@ -1,0 +1,90 @@
+@version: 3.0
+
+options {
+    keep_timestamp(no);
+    frac_digits(3);
+    ts_format(iso);
+    send_time_zone("PST8PDT");
+    keep_hostname(yes);
+    long_hostnames(off);
+    flush_lines(1);
+    owner(root);
+    group(adm);
+    perm(0640);
+    dir_perm(0750);
+    create_dirs(yes);
+    log_fifo_size(1024);
+    time_reopen(5);
+    stats_freq(0);
+    mark_freq(0);
+};
+
+source src {
+    file("/proc/kmsg" program_override("kernel"));
+    unix-stream("/dev/log");
+    internal();
+};
+
+# bbox
+source src_bbox {
+    tcp(so_keepalive(yes));   # button boxes use tcp to log
+};
+
+# One catch-all logfile.
+destination messages { file("/data/var/log/messages" fsync(yes)); };
+
+# bbox
+destination bbox_messages { file("/data/var/log/bbox.messages" fsync(yes)); };
+
+# The root's console.
+destination console { usertty("root"); };
+
+########################################
+# Here are the filter options.
+# With these rules, we can set which messages go where.
+
+filter f_daemon { facility(daemon); };
+filter f_kern { facility(kern); };
+filter f_user { facility(user); };
+
+filter f_debug { level(debug)
+    and not facility(daemon, kern, user, mail, news); };
+filter f_messages { level(info .. emerg)
+    and not facility(daemon, kern, user, mail, news); };
+
+filter f_emergency { level(emerg); };
+
+# bbox                                                  
+filter f_bbox { not program("udhcpc") and not program("syslog-ng"); };
+filter f_phone { not program("udhcpd"); };
+ 
+########################################
+# log statements actually send logs somewhere,
+# to a file, across the network, etc
+
+# by facility
+#log { source(src); filter(f_daemon); destination(messages); };
+#log { source(src); filter(f_kern);   destination(messages); };
+#log { source(src); filter(f_user);   destination(messages); };
+
+# by priority
+#log { source(src); filter(f_debug);    destination(messages); };
+#log { source(src); filter(f_messages); destination(messages); };
+
+# by destination
+#log { source(src); filter(f_emergency); destination(console); };
+
+#phone                                                           
+#log { source(src_bbox); filter(f_bbox); destination(bbox_messages); };
+#log { source(src); filter(f_phone); destination(messages); };   
+# bbox                                                                 
+#log { source(src); filter(f_bbox); destination(messages); };           
+
+########################################
+# log to a remote host
+
+filter f_loghost{level(crit .. emerg);};        # at least critical
+
+# destination loghost { [tcp|udp]("<address>" port(<port>)); };
+# log { source(src); filter(f_loghost); destination(loghost); };
+# log { source(src_bbox); filter(f_loghost); destination(loghost); };

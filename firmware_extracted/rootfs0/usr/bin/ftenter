@@ -1,0 +1,13 @@
+#!/bin/ash
+if [ -z "${PHONE_APP}" ]; then
+ echo 'Failure [${PHONE_APP} empty]'
+ exit 1
+fi
+/etc/rc.d/K010applic stop
+while ! watchdog -D /dev/watchdog 2>/dev/null; do
+ echo -n .
+ usleep 250000
+done
+echo Watchdog Disabled
+echo Success
+exit 0

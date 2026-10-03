@@ -1,0 +1,65 @@
+This file documents some useful example pxcon scripts.
+These scripts may need to be modified to work in your system.
+You may specify the scripts when you launch pxcon
+(via syntax ./pxcon <name_of_script>) or once pxcon is running by
+using the 'sc' command.
+
+Note that unless otherwise stated, the scripts are for voice streams only.
+
+call_to_68.sc  This script makes a VoIP connection to the IP phone
+               at remote address 192.168.1.68.  Before starting pxcon
+	       you should stop other programs from using EPT.  Do this
+	       by typing 'killall callmgr callctrl' in the console.
+
+call_to_75.sc  This script makes a VoIP connection to the IP phone
+               at remote address 192.168.1.75. Before starting pxcon
+	       you should stop other programs from using EPT.  Do this
+	       by typing 'killall callmgr callctrl' in the console.
+
+If you have 2 IP phones on a network, the above 2 scripts can be modified
+and run to connect the phones to each other.  You should only need to
+change the IP addresses and ports within the script.
+
+voice_network_loopback.sc  This script starts a call and loops the ingress
+	       packets to egress packets at the IP network interface.
+	       You may speak into the handset and hear yourself in
+	       handset.  Before starting pxcon you should stop other
+	       programs from using EPT.  Do this by typing
+	       'killall callmgr callctrl' in the console.
+
+stopStartCall.sc  This script puts the call into an inactive mode for
+	       500ms then starts the call again.  If executed by pxcon
+	       command 'sc stopStartCall.sc 7' it will stop then start
+	       the call again 7 times.
+
+dial_tone.sc   Generating continuous dial tone on stream 0 that is
+               attached to device 0 (handset). Before starting pxcon
+	       you should stop other programs from using EPT.  Do this
+	       by typing 'killall callmgr callctrl' in the console.
+
+bind_and_connect_spkrphone.sc  Binds the EPT Speakerphone device and
+	       sets the Audio Mixer connection for a speakerphone.
+
+handset_to_spkrphone.sc Switches from handset to speakerphone.  You
+	       must have a handset call in progress before using this
+	       script.  You must also ensure that the speakerphone
+               EPT binding and Audio Mixer connections are in place
+	       before using this script.  These connections may already
+               have been done in pxcon or the CallMgr.
+
+spkrphone_to_handset.sc Switches from speakerphone to handset.  You
+	       must have a speakerphone call in progress before using this
+	       script.
+
+video_loopback_h264_1Mbps_VGA.sc  This script starts a video call and loops
+               the ingress packets to egress packets at the IP network interface.
+               A voice stream is not started. Before starting pxcon you
+               should stop other programs from using EPT.  Do this by typing
+               'killall callmgr callctrl' in the console.
+
+voice_and_video_loopback_h264_1Mbps_VGA.sc  This script starts a video call and loops
+               the ingress packets to egress packets at the IP network interface.
+               A voice stream is also started. Before starting pxcon you
+               should stop other programs from using EPT.  Do this by typing
+               'killall callmgr callctrl' in the console.
+

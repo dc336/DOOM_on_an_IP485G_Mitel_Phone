@@ -1,0 +1,154 @@
+#!/bin/ash
+# 
+# update-do version
+usage () {
+ echo 'Usage: update-do [--idle] version'
+ exit 1
+}
+logger -s -t update-do -p info "invoked from `id -un`@`ip -f inet -o address | grep -v -E ': (lo|br)' | sed -n -e 's;.* inet \([^/]*\).*;\1;p'` w/ $*"
+other_update_do=`ps -o pid,ppid,pgid,comm | grep -v "\<$$\>" | sed -n -e 's;^ *[0-9][0-9]*  *[0-9][0-9]*  *\([0-9][0-9]*\) update-do;\1;p'`
+if [ "${other_update_do}" ]; then
+ logger -s -t update-do -p err 'Redundant invocation'
+ exit 1
+fi
+if [ "$1" == "--idle" ]; then
+ idle=true
+ shift
+else
+ idle=false
+fi
+if [ $# -lt 1 ]; then
+ logger -s -t update-do -p err 'Bad arguments'
+ usage
+fi
+version=$1
+currbank=`sed -n -e 's;.*rootfs\([01]\).*;\1;p' /proc/cmdline`
+if ! [ "$currbank" ]; then
+ logger -s -t update-do -p err 'Internal failure: cannot determine bank from cmdline'
+ exit 1
+fi
+nextbank=$((1-currbank))
+if ! [ -s /etc/update/version$nextbank ]; then
+ logger -s -t update-do -p err "/etc/update/version$nextbank is missing, perform update-stage (again)"
+ exit 1
+fi
+if ! [ -s /etc/update/ctrl$nextbank.original ]; then
+ logger -s -t update-do -p err "/etc/update/ctrl$nextbank.original is missing, perform update-stage (again)"
+ exit 1
+fi
+if ! [ -h /webroot/phones/${version} ]; then
+ logger -s -t update-do -p err "/webroot/phones/${version} is missing, perform update-stage (again)"
+ exit 1
+fi
+if [ "`cat /etc/update/version$nextbank`" != "$version" ]; then
+ logger -s -t update-do -p err "Alternate bank contains `cat /etc/update/version$nextbank`, perform update-stage (again)"
+ exit 1
+fi
+# ensure /dev/ubi0_n exists
+mdev -s 2>/dev/null
+# prepare to delete any masking files in /data
+findnx /data \! -type d | sort | sed -e 's;^/data;;' >/tmp/ud$$-data
+# manifest contains volume names to find
+findnames=`sed -e "s;\t.*;$nextbank;" /etc/update/manifest$nextbank`
+rm -f /tmp/fs-stop-data-rm
+# find ctrl$nextbank
+for voln in `/usr/sbin/mtd-utils/ubinfo /dev/ubi0 | sed -n -e 's;^Present volumes: *\(.*\)$;\1;p' | tr -d ,`; do
+ name=`/usr/sbin/mtd-utils/ubinfo /dev/ubi0_$voln | sed -n -e "s;^Name: *\(.*\);\1;p"`
+ if echo $findnames | grep -q -s "\<$name\>"; then
+  # found a volume from the manifest: remove it from the list to find
+  findnames=`echo $findnames | sed -e "s;\<$name\> *;;"`
+  # recover base name
+  mntname=`echo $name | sed -e 's;[01]$;;'`
+  # confirm file system format is understood
+  fstype=`sed -n -e "s;^${mntname}\t[^\t]*\t[^\t]*\t[^\t]*\t\([^\t]*\).*;\1;p" /etc/update/manifest$nextbank`
+  case ${fstype} in
+   ctrl)
+    volcnew=${voln}
+    # no conflict potential in /data in ctrl
+    continue
+    ;;
+   zImage)
+    # no conflict potential in /data in kernel
+    continue
+    ;;
+   squashfs)
+    # find associated /dev/mtd device 
+    mtddev=`sed -n -e "s;^\(mtd[^:]*\):.*\"$name\".*;\1;p" /proc/mtd`
+    if [ -z ${mtddev} ]; then
+     logger -s -t update-do -p err "vol ${mntname} not found in /proc/mtd"
+    else
+     unsquashfs -l /dev/${mtddev} | sed -n -e 's;^squashfs-root;;p' >/tmp/ud$$-next
+    fi
+    ;;
+   *)
+    logger -s -t update-do -p warn "fstype ${fstype} not understood"
+    continue
+    ;;
+  esac
+  # merge in all candidate white-out names that can appear in /data
+  sed -e 's;\(.*/\)\(.*\);\1.wh.\2;' /tmp/ud$$-next >/tmp/ud$$-wh
+  sed -e 's;[^/]*$;.wh.__dir_opaque;' /tmp/ud$$-next >>/tmp/ud$$-wh
+  cat /tmp/ud$$-next /tmp/ud$$-wh | sort -u >/tmp/ud$$-in-out
+  # collect /data files to delete
+  comm -12 /tmp/ud$$-data /tmp/ud$$-in-out | sed -e 's;^;/data;' >>/tmp/fs-stop-data-rm
+  # if found all names, quit now
+  if [ -z "$findnames" ]; then
+   break;
+  fi
+ elif [ "$name" == "ctrl$currbank" ]; then
+  volcold=${voln}
+ fi
+done
+if [ "$findnames" ]; then
+ logger -s -t update-do -p err "ubinfo failed to find $findnames, not automatically rebooting"
+ exit 1
+fi
+if [ -s /tmp/fs-stop-data-rm ]; then
+ logger -s -t update-do -p info "Staging `cat /tmp/fs-stop-data-rm | wc -l` masking /data files for deletion"
+fi
+touch /data/fs-start-data-cleanup
+# ctrl vol needs some swizzling
+nextnow="`date +%Y-%m-%d-%H-%M-%S`"
+nextdate="`echo $nextnow | sed -e 's;^\([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\)-\([0-9][0-9]\)-\([0-9][0-9]\)-\([0-9][0-9]\).*;\1 \2:\3:\4;'`"
+# ensure date is greater than the current bank ctrl
+currline1="`head -1 /dev/ubi0_${volcold}`"
+currnow="`echo -n "${currline1}" | head -c 19`"
+currdate="`echo $currnow | sed -n -e 's;^\([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\)-\([0-9][0-9]\)-\([0-9][0-9]\)-\([0-9][0-9]\).*;\1 \2:\3:\4;p'`"
+if [ "${currdate}" ]; then
+ if [ `date -d "${nextdate}" +%s` -le `date -d "${currdate}" +%s` ]; then
+  # can parse currrent ctrl partition date, and it is inappropriately not less than the intended next date
+  if [ "${currline1}" == "${currnow}" ]; then
+   # first time adding differentiating suffix
+   nextnow="${currnow}-00002"
+  else
+   # increment existing differentiating suffix
+   currsuffix="`echo -n "${currline1}" | tail -c 5`"
+   if [ "${currsuffix}" -a -z "${currsuffix//[0-9]/}" ]; then
+    # (currsuffix passes "is a number" test)
+    nextnow="${currnow}-`echo -n "00000$((currsuffix+1))" | tail -c 5`"
+   fi
+  fi
+ fi
+fi
+# .staged is arguably a poor suffix, but needs to remain as-is to support pre-ENG-420572-fix update-status
+sed -e "1s;.*;${nextnow};" -e "s;\#;${nextbank};g" /etc/update/ctrl$nextbank.original >/etc/update/ctrl${nextbank}.staged
+/usr/sbin/mtd-utils/ubiupdatevol /dev/ubi0_${volcnew} /etc/update/ctrl$nextbank.staged -s 2048
+result=$?
+if [ $result -ne 0 ]; then
+ logger -s -t update-do -p err "ubiupdatevol failed $result, not automatically rebooting"
+ exit 1
+fi
+echo "`sed -n -e '7p' /etc/update/ctrl$nextbank.staged` `cat /proc/manuf/serialNumber`" | logger -s -t update-do -p info
+# record update-do performed
+rm -f /etc/update/update-staged
+if which netcat >/dev/null; then
+ if $idle; then
+  echo rebootwhenidle update | netcat -U /tmp/cli_interface_socket 2>&1 >/dev/null || reboot
+ else
+  echo reboot update | netcat -U /tmp/cli_interface_socket 2>&1 >/dev/null || reboot
+  sleep 30
+  reboot
+ fi
+else
+ reboot
+fi

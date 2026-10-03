@@ -1,0 +1,7 @@
+no-vt
+no-vt-switch
+disable-module=keyboard
+hardware
+pixelformat=ARGB
+depth=32
+quiet

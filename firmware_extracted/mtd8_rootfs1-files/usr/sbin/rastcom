@@ -1,0 +1,8 @@
+#!/bin/sh
+
+netcat -U /var/run/vpn.socket << EOF
+ipaddress=$1
+EOF
+if [ $? -ne 0 ]; then
+    logger -t $0 -p user.error "RAST daemon failed to send message"
+fi

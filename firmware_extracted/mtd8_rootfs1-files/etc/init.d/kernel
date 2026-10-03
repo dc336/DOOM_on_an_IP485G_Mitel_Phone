@@ -1,0 +1,55 @@
+#!/bin/ash
+#
+# configure kernel
+
+software=`cat /proc/manuf/software`
+unset modules
+modules="${modules} evdev"                      # event (input)
+if [ "${software}" != "bb" ]; then
+  modules="${modules} halaudio halaudio_apm halaudio_pcm"
+fi
+if [ "${software}" == "p8cg" ]; then
+  modules="${modules} halaudio_usb"
+fi
+#modules="${modules} bcmring_rng"                # ? magically brings in all the bcmring_ ?
+modules="${modules} 8021q"                      # 802.1Q tagging
+modules="${modules} xt_DSCP xt_CLASSIFY"        # iptables QoS
+if [ "${software}" != "bb" ]; then
+  modules="${modules} ppp_generic ppp_async tun" # VPN
+  modules="${modules} ept_core"                 # endpoint driver
+  # previously in /etc/if_bcm_net_setup.sh...
+  modules="${modules} bcmring_net"              # network driver
+  modules="${modules} bcmring_eth_sla"          # switch driver
+fi
+
+case "$1" in
+ start|"")
+  # Allow RT threads to take as much CPU as necessary
+  echo -1 2>&1 >/proc/sys/kernel/sched_rt_runtime_us | logger -s -t init.d/kernel
+
+  # Enable warm reboot where the Ethernet switch stays running
+  echo  1 2>&1 >/proc/sys/reboot/warm | logger -s -t init.d/kernel
+
+  # Reboot in 5 seconds on a kernel panic
+  echo  5 2>&1 >/proc/sys/kernel/panic | logger -s -t init.d/kernel
+
+  # Panic on kernel oops
+  echo  1 2>&1 >/proc/sys/kernel/panic_on_oops | logger -s -t init.d/kernel
+
+  # Don't use the PID in core file names
+  echo  0 2>&1 >/proc/sys/kernel/core_uses_pid | logger -s -t init.d/kernel
+
+  for m in ${modules}; do
+    modprobe 2>&1 $m | logger -s -t init.d/kernel
+  done
+  ;;
+
+ stop)
+  # modprobe -r ${modules} 2>&1 | logger -s -t init.d/kernel
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+esac

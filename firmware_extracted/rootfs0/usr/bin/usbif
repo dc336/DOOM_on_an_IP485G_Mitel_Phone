@@ -1,0 +1,39 @@
+#!/bin/sh
+
+# USB modules to load
+if [ "`cat /proc/manuf/software`" == "bb" ]; then
+  USB_MODS='ohci_hcd ehci_hcd usb_storage smsc2514b'
+else
+  USB_MODS='ohci_hcd ehci_hcd usb_storage'
+fi
+
+# P8CG GPIO for USB switch enable
+USB_SWEN=27
+
+usage() {
+  cat >&2 << EOF
+Usage: $0 [up | down] - Bring the USB interface up or down
+EOF
+  exit 1
+}
+
+if [ ! "$1" ]; then
+  usage
+fi
+
+case $1 in
+  up)
+    gpio output $USB_SWEN 1
+    for mod in $USB_MODS; do
+      modprobe $mod
+    done
+  ;;
+  down)
+    for mod in $USB_MODS; do
+      modprobe -r $mod
+    done
+    gpio output $USB_SWEN 0
+  ;;
+  *)   usage
+  ;;
+esac

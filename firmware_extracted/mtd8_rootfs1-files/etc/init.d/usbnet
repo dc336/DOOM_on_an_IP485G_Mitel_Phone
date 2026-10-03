@@ -1,0 +1,86 @@
+#!/bin/ash
+#
+# configure usbnet
+
+case "$1" in
+ start|"")
+  case "`cat /proc/manuf/software`" in
+   bb)
+    if [ -n "$2" ]; then
+     echo "waiting $2 secs..."
+     sleep $2
+    fi
+
+    # set up MAC address for lldp
+    if_setup.sh down 2>/dev/null
+
+    /etc/init.d/log reload "169.254.0.1:514;tcp" UTC debug
+
+    modprobe g_ether
+
+    ifplugd -i usb0 -f -a -M -I -r /etc/ifusb-bb
+
+    ( crontab -l 2>/dev/null | grep -Fv usb0 ; printf -- "* * * * * ifplugd -i usb0 -f -a -M -I -r /etc/ifusb-bb\n" ) | crontab -
+
+    mkdir -p /var/run/lldpd
+    ;;
+
+   p8cg)
+    /bin/gpio output 27 1
+
+    modprobe ohci_hcd
+    modprobe ehci_hcd
+
+    modprobe usbnet
+    modprobe cdc_ether
+
+    modprobe llc
+    modprobe stp
+    modprobe bridge
+
+    echo -1 > /sys/module/usbcore/parameters/autosuspend 
+    echo Y > /sys/module/usbcore/parameters/old_scheme_first 
+
+    ifplugd -i usb0 -f -a -M -I -r /etc/ifusb-p8cg
+    ifplugd -i usb1 -f -a -M -I -r /etc/ifusb-p8cg
+    ifplugd -i usb2 -f -a -M -I -r /etc/ifusb-p8cg
+    ifplugd -i usb3 -f -a -M -I -r /etc/ifusb-p8cg
+
+    ( crontab -l 2>/dev/null | grep -Fv usb0 ; printf -- "* * * * * ifplugd -i usb0 -f -a -M -I -r /etc/ifusb-p8cg\n" ) | crontab -
+    ( crontab -l 2>/dev/null | grep -Fv usb1 ; printf -- "* * * * * ifplugd -i usb1 -f -a -M -I -r /etc/ifusb-p8cg\n" ) | crontab -
+    ( crontab -l 2>/dev/null | grep -Fv usb2 ; printf -- "* * * * * ifplugd -i usb2 -f -a -M -I -r /etc/ifusb-p8cg\n" ) | crontab -
+    ( crontab -l 2>/dev/null | grep -Fv usb3 ; printf -- "* * * * * ifplugd -i usb3 -f -a -M -I -r /etc/ifusb-p8cg\n" ) | crontab -
+
+    brctl addbr br0
+    ifconfig br0 169.254.0.1 netmask 255.255.255.0 up
+
+    mkdir -p /var/lib/misc
+    touch /var/lib/misc/udhcpd.leases
+    udhcpd -S /etc/udhcpd.conf
+    ;;
+
+   *)
+    echo '/proc/manuf/software not set, so usbnet not configured'
+    ;;
+
+  esac
+  ;;
+
+ stop)
+  case "`cat /proc/manuf/software`" in
+   bb)
+    rmmod g_ether
+    rmmod bcm_udc_dwc
+    ;;
+
+   p8cg)
+    ;;
+
+  esac
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+esac

@@ -1,0 +1,9 @@
+5 * * * * /usr/sbin/logrotate /etc/logrotate.conf
+45 10 * * 1 echo | cat /var/tmp/scrub0 - | head -1 | xargs scrub0 >/var/tmp/$$; mv /var/tmp/$$ /var/tmp/scrub0
+15 14 * * 4 echo | cat /var/tmp/scrub0 - | head -1 | xargs scrub0 >/var/tmp/$$; mv /var/tmp/$$ /var/tmp/scrub0
+37 6,18 * * * nice -n 10 /usr/sbin/mem-log
+0,5,10,15,20,25,30,35,40,45,50,55 * * * * nice -n 10 /usr/bin/telemeter
+* * * * * ifplugd -i usb0 -f -a -M -I -r /etc/ifusb-p8cg
+* * * * * ifplugd -i usb1 -f -a -M -I -r /etc/ifusb-p8cg
+* * * * * ifplugd -i usb2 -f -a -M -I -r /etc/ifusb-p8cg
+* * * * * ifplugd -i usb3 -f -a -M -I -r /etc/ifusb-p8cg

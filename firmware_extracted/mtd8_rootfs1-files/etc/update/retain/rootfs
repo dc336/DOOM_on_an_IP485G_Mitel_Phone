@@ -1,0 +1,38 @@
+#!/bin/ash
+#
+# rootfs wants /etc/issue, host key, and
+# specific files in /etc/update & /webroot retained
+[ $# -ne 1 ] && exit 1
+[ -s $1 ] || exit 0
+cat <<"EOF" >/tmp/retain
+^/data/etc/issue$
+^/data/etc/dropbear/dropbear_rsa_host_key$
+^/data/etc/update/ctrl0\.original$
+^/data/etc/update/ctrl0\.staged$
+^/data/etc/update/ctrl1\.original$
+^/data/etc/update/ctrl1\.staged$
+^/data/etc/update/manifest0$
+^/data/etc/update/manifest1$
+^/data/etc/update/update-staged$
+^/data/etc/update/version0$
+^/data/etc/update/version1$
+EOF
+software=`cat /proc/manuf/software`
+for bank in 0 1; do
+ version=`cat /data/etc/update/version${bank}`
+ toc_type=`ls /data/webroot/bank${bank}/${software}-*_ctrl.bin | sed -e 's;.*-\(.*\)_ctrl.bin;\1;'`
+ toc_type=${toc_type:-toc}
+ if [ "${version}" ]; then
+  # legacy manifest/ctrl file names
+  echo "^/data/webroot/bank${bank}/${software}-${version}\.txt\$" >>/tmp/retain
+  echo "^/data/webroot/bank${bank}/${software}-ctrl-${version}\.bin\$" >>/tmp/retain
+  # current manifest/ctrl file names
+  echo "^/data/webroot/bank${bank}/${software}-${toc_type}\.txt\$" >>/tmp/retain
+  echo "^/data/webroot/bank${bank}/${software}-${toc_type}_ctrl.bin\$" >>/tmp/retain
+  # toc and version link
+  echo "^/data/webroot/bank${bank}/${toc_type}\.txt\$" >>/tmp/retain
+  echo "^/data/webroot/phones/${version}\$" >>/tmp/retain
+ fi
+done
+grep -v -f /tmp/retain $1 >$1.tmp
+mv $1.tmp $1

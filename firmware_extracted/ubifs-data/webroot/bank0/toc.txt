@@ -1,0 +1,2 @@
+model	hwCompat	version	manifest	sha1	model(s)
+p8cg	4	804.2002.1100.0	p8cg-toc.txt	7a1fe089bd7f9b4020a1d3ca8e857139b7f95b89	IP485g

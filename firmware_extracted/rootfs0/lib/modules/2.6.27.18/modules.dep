@@ -1,0 +1,95 @@
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/vcp/vcp.ko: 
+/lib/modules/2.6.27.18/BROADCOM/amxr.ko: 
+/lib/modules/2.6.27.18/kernel/sound/core/snd-pcm.ko: /lib/modules/2.6.27.18/kernel/sound/core/snd-timer.ko /lib/modules/2.6.27.18/kernel/sound/core/snd-page-alloc.ko /lib/modules/2.6.27.18/kernel/sound/core/snd.ko
+/lib/modules/2.6.27.18/kernel/drivers/usb/gadget/g_ether.ko: /lib/modules/2.6.27.18/kernel/drivers/usb/gadget/bcm_udc_dwc.ko
+/lib/modules/2.6.27.18/kernel/drivers/net/mii.ko: 
+/lib/modules/2.6.27.18/kernel/sound/core/snd-hwdep.ko: /lib/modules/2.6.27.18/kernel/sound/core/snd.ko
+/lib/modules/2.6.27.18/kernel/drivers/net/ppp_async.ko: /lib/modules/2.6.27.18/kernel/lib/crc-ccitt.ko /lib/modules/2.6.27.18/kernel/drivers/net/ppp_generic.ko
+/lib/modules/2.6.27.18/kernel/drivers/usb/gadget/bcm_udc_dwc.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv4/ipip.ko: /lib/modules/2.6.27.18/kernel/net/ipv4/tunnel4.ko
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/gist.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_MASQUERADE.ko: /lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/nf_nat.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_ecn.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/net/usb/cdc_ether.ko: /lib/modules/2.6.27.18/kernel/drivers/net/usb/usbnet.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/iptable_mangle.ko: /lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ip_tables.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_REJECT.ko: 
+/lib/modules/2.6.27.18/kernel/fs/lockd/lockd.ko: /lib/modules/2.6.27.18/kernel/net/sunrpc/sunrpc.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/nf_nat.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/net/tun.ko: 
+/lib/modules/2.6.27.18/BROADCOM/halaudio.ko: /lib/modules/2.6.27.18/BROADCOM/amxr.ko
+/lib/modules/2.6.27.18/kernel/sound/core/snd.ko: /lib/modules/2.6.27.18/kernel/sound/soundcore.ko
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/bcm_alsa/bcm_alsa.ko: /lib/modules/2.6.27.18/kernel/sound/core/snd-pcm.ko /lib/modules/2.6.27.18/kernel/sound/core/snd.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_ECN.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_IDLETIMER.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/usb/host/ohci-hcd.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/halaudio_drivers/usb/halaudio_usbcore.ko: 
+/lib/modules/2.6.27.18/BROADCOM/pxcLdxSupport.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv4/ip_gre.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/input/evbug.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_TTL.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/csx/csx_sigmorph/csx_sigmorph.ko: /lib/modules/2.6.27.18/kernel/drivers/char/broadcom/gist.ko /lib/modules/2.6.27.18/kernel/drivers/char/broadcom/csx/csx_framework/csx.ko /lib/modules/2.6.27.18/kernel/drivers/char/broadcom/sigmorph.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_ah.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/scsi/scsi_wait_scan.ko: /lib/modules/2.6.27.18/kernel/drivers/scsi/scsi_mod.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/iptable_nat.ko: /lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ip_tables.ko /lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/nf_nat.ko
+/lib/modules/2.6.27.18/kernel/net/ipv6/ipv6.ko: 
+/lib/modules/2.6.27.18/kernel/sound/usb/snd-usb-lib.ko: /lib/modules/2.6.27.18/kernel/sound/core/snd-rawmidi.ko
+/lib/modules/2.6.27.18/kernel/net/netfilter/xt_DSCP.ko: 
+/lib/modules/2.6.27.18/kernel/net/llc/llc2.ko: /lib/modules/2.6.27.18/kernel/net/llc/llc.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/tunnel4.ko: 
+/lib/modules/2.6.27.18/kernel/sound/core/snd-page-alloc.ko: 
+/lib/modules/2.6.27.18/kernel/net/802/stp.ko: /lib/modules/2.6.27.18/kernel/net/llc/llc.ko
+/lib/modules/2.6.27.18/kernel/drivers/char/bcmring/bcmring_esw.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv6/xfrm6_mode_tunnel.ko: /lib/modules/2.6.27.18/kernel/net/ipv6/ipv6.ko
+/lib/modules/2.6.27.18/kernel/net/llc/llc.ko: 
+/lib/modules/2.6.27.18/kernel/net/8021q/8021q.ko: 
+/lib/modules/2.6.27.18/kernel/sound/core/snd-rawmidi.ko: /lib/modules/2.6.27.18/kernel/sound/core/snd.ko
+/lib/modules/2.6.27.18/kernel/drivers/net/bcmring_net.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/halaudio_drivers/alsa/snd_halaudio.ko: /lib/modules/2.6.27.18/kernel/sound/core/snd-pcm.ko /lib/modules/2.6.27.18/kernel/sound/core/snd.ko
+/lib/modules/2.6.27.18/kernel/sound/core/snd-timer.ko: /lib/modules/2.6.27.18/kernel/sound/core/snd.ko
+/lib/modules/2.6.27.18/BROADCOM/pka_core.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_LOG.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/csx/csx_halaudio/csx_halaudio.ko: /lib/modules/2.6.27.18/kernel/drivers/char/broadcom/csx/csx_framework/csx.ko
+/lib/modules/2.6.27.18/kernel/drivers/net/usb/usbnet.ko: /lib/modules/2.6.27.18/kernel/drivers/net/mii.ko
+/lib/modules/2.6.27.18/BROADCOM/pxcLdxHausware.ko: /lib/modules/2.6.27.18/BROADCOM/pxcLdxSupport.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_ULOG.ko: 
+/lib/modules/2.6.27.18/kernel/net/802/p8022.ko: /lib/modules/2.6.27.18/kernel/net/llc/llc.ko
+/lib/modules/2.6.27.18/kernel/net/ipv6/netfilter/nf_conntrack_ipv6.ko: /lib/modules/2.6.27.18/kernel/net/ipv6/ipv6.ko
+/lib/modules/2.6.27.18/kernel/drivers/net/slhc.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv6/sit.ko: /lib/modules/2.6.27.18/kernel/net/ipv6/ipv6.ko /lib/modules/2.6.27.18/kernel/net/ipv4/tunnel4.ko
+/lib/modules/2.6.27.18/kernel/drivers/scsi/sd_mod.ko: /lib/modules/2.6.27.18/kernel/drivers/scsi/scsi_mod.ko
+/lib/modules/2.6.27.18/kernel/net/bridge/bridge.ko: /lib/modules/2.6.27.18/kernel/net/802/stp.ko /lib/modules/2.6.27.18/kernel/net/llc/llc.ko
+/lib/modules/2.6.27.18/BROADCOM/ept_driver.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/mmc/host/sdhci.ko: 
+/lib/modules/2.6.27.18/kernel/fs/nfs/nfs.ko: /lib/modules/2.6.27.18/kernel/fs/lockd/lockd.ko /lib/modules/2.6.27.18/kernel/net/sunrpc/sunrpc.ko
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/csx/csx_gist/csx_gist.ko: /lib/modules/2.6.27.18/kernel/drivers/char/broadcom/gist.ko /lib/modules/2.6.27.18/kernel/drivers/char/broadcom/csx/csx_framework/csx.ko
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/csx/csx_framework/csx.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/halaudio_drivers/usb/halaudio_usb.ko: /lib/modules/2.6.27.18/kernel/drivers/char/broadcom/halaudio_drivers/usb/halaudio_usbcore.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_recent.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv6/xfrm6_mode_transport.ko: 
+/lib/modules/2.6.27.18/kernel/lib/crc-ccitt.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/halaudio_drivers/bcmring/apm/halaudio_apm.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_addrtype.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/net/usb/cdc_subset.ko: /lib/modules/2.6.27.18/kernel/drivers/net/usb/usbnet.ko
+/lib/modules/2.6.27.18/kernel/net/ipv6/xfrm6_mode_beet.ko: /lib/modules/2.6.27.18/kernel/net/ipv6/ipv6.ko
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ip_tables.ko: 
+/lib/modules/2.6.27.18/kernel/net/netfilter/xt_dscp.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ipt_ttl.ko: 
+/lib/modules/2.6.27.18/kernel/sound/usb/snd-usb-audio.ko: /lib/modules/2.6.27.18/kernel/sound/core/snd-pcm.ko /lib/modules/2.6.27.18/kernel/sound/core/snd-hwdep.ko /lib/modules/2.6.27.18/kernel/sound/core/snd.ko /lib/modules/2.6.27.18/kernel/sound/usb/snd-usb-lib.ko
+/lib/modules/2.6.27.18/kernel/net/802/psnap.ko: /lib/modules/2.6.27.18/kernel/net/llc/llc.ko
+/lib/modules/2.6.27.18/kernel/drivers/video/output.ko: 
+/lib/modules/2.6.27.18/BROADCOM/csx_hausware.ko: /lib/modules/2.6.27.18/BROADCOM/pxcLdxSupport.ko /lib/modules/2.6.27.18/kernel/drivers/char/broadcom/csx/csx_framework/csx.ko
+/lib/modules/2.6.27.18/kernel/drivers/usb/host/ehci-hcd.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/usb/storage/usb-storage.ko: /lib/modules/2.6.27.18/kernel/drivers/scsi/scsi_mod.ko
+/lib/modules/2.6.27.18/kernel/sound/soundcore.ko: 
+/lib/modules/2.6.27.18/kernel/net/sunrpc/sunrpc.ko: 
+/lib/modules/2.6.27.18/BROADCOM/ept_core.ko: /lib/modules/2.6.27.18/BROADCOM/ept_driver.ko /lib/modules/2.6.27.18/BROADCOM/pxcLdxHausware.ko /lib/modules/2.6.27.18/BROADCOM/pxcLdxSupport.ko
+/lib/modules/2.6.27.18/kernel/net/netfilter/xt_CLASSIFY.ko: 
+/lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/iptable_filter.ko: /lib/modules/2.6.27.18/kernel/net/ipv4/netfilter/ip_tables.ko
+/lib/modules/2.6.27.18/kernel/drivers/hid/usbhid/usbhid.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/char/broadcom/sigmorph.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/net/ppp_generic.ko: /lib/modules/2.6.27.18/kernel/drivers/net/slhc.ko
+/lib/modules/2.6.27.18/BROADCOM/bcmring_eth_sla.ko: /lib/modules/2.6.27.18/kernel/drivers/char/bcmring/bcmring_esw.ko
+/lib/modules/2.6.27.18/kernel/drivers/usb/gadget/g_serial.ko: /lib/modules/2.6.27.18/kernel/drivers/usb/gadget/bcm_udc_dwc.ko
+/lib/modules/2.6.27.18/kernel/drivers/scsi/scsi_mod.ko: 
+/lib/modules/2.6.27.18/kernel/drivers/scsi/sg.ko: /lib/modules/2.6.27.18/kernel/drivers/scsi/scsi_mod.ko
+/lib/modules/2.6.27.18/kernel/drivers/input/evdev.ko: 

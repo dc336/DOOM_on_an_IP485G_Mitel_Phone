@@ -1,0 +1,2 @@
+model	hwCompat	version	manifest	sha1	model(s)
+bb	4	804.2002.1100.0	bb-bb.txt	e28c9637dfb0e75e18105c3c1fe77247b80194c7	BB424

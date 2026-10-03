@@ -1,0 +1,603 @@
+#!/bin/ash
+# 
+# update-stage [--validate] [--dbg] version [sources] [check]
+#
+usage () {
+ echo 'Usage: update-stage [--validate] [--dbg] version [sources] [check]'
+ exit 1
+}
+
+firmwarestatusevent() {
+ if ${burnflash} && [ -S /tmp/cli_interface_socket ]; then
+  echo firmwarestatusevent $@ | netcat -U /tmp/cli_interface_socket 2>&1 >/dev/null
+ fi
+}
+
+verify_set () {
+ status=$?
+ verify=`cat /tmp/us$$-verify`
+ if [ ${status} -eq 0 -a "${verify}" != "${verify% OK;}" ]; then
+  verified=true
+ else
+  verified=false
+ fi
+}
+
+validate () {
+ openssl dgst -sha1 -verify /tmp/us$$-pubkey -signature /tmp/us$$-signature $1 | tr \\n ';' >/tmp/us$$-verify
+ verify_set
+ if ${verified}; then
+  if [ "${vol}" == "ctrl" ]; then
+   sed -n -e "s;^\(${vol}\t\)[^\t]*\(\t.*\);\1${file##*/}\2;p" /tmp/us$$-manifest >> /tmp/us$$-webroot-manifest
+  else
+   # match and replace exactly one of:
+   #   a source with an origName
+   #   a complicated name that does not have origName propagated
+   #   a source with a simple name
+   sed -n -e "s;^\(${vol}\t\)[^\t]*[&?]origName=\([^\t&]*\)[^\t]*\(.*\);\1/cgi-bin/fw-mirror?origName=\2\&volName=${vol}${nextbank}\&size=${size}\3;p" \
+     -e "s;^\(${vol}\t\)\([^\t&?/:]*\)\(\t.*\);\1/cgi-bin/fw-mirror?origName=\2\&volName=${vol}${nextbank}\&size=${size}\3;p" \
+     -e "s;^\(${vol}\t\)[^\t]*\(\t.*\);\1/cgi-bin/fw-mirror?volName=${vol}\&size=${size}${nextbank}\2;p" /tmp/us$$-manifest | \
+     head -1 >> /tmp/us$$-webroot-manifest
+  fi
+ fi
+}
+
+massage_file () {
+ # massage file
+ if [ "${file}" == "${file#*/}" ]; then
+  # no path at all: prefix file with phones/${version}${check}
+  file="phones/${version}${check}/${file}"
+ fi
+ if [ "${file}" == "${file#*://}" ]; then
+  # no URI: prefix file with ${source}
+  file="${source}/${file#/}"
+ fi
+}
+
+logger -s -t update-stage -p info "invoked from `id -un`@`ip -f inet -o address | grep -v -E ': (lo|br)' | sed -n -e 's;.* inet \([^/]*\).*;\1;p'` w/ $*"
+rm -rf /tmp/us$$-*
+echo $PATH | tr : '\n' | sort >/tmp/us$$-path
+cat <<EOF | comm -23 - /tmp/us$$-path | tr '\n' : | sed -e 's;\(.*\):$;$PATH missing \1, required for backwards compatibility;' | logger -s -t update-stage -p err 
+/bin
+/sbin
+/usr/bin
+EOF
+mkdir -p /etc/update
+touch /etc/update/update-staged
+if [ "${1}" == "--validate" ]; then
+ burnflash=false
+ methods=exists
+ shift
+else
+ burnflash=true
+ methods="exists local remote"
+fi
+model=
+wget_bind=
+if [ "${1#--}" == "${1}" ]; then
+ tocname=toc.txt
+else
+ tocname=${1#--}.txt
+ if [ "${1#--}" == "bb" ]; then
+  model="${1#--}"
+  usb_addr=`ip -f inet -o address | grep ': usb' | sed -n -e 's;.* inet \([^/]*\).*;\1;p'`
+  if [ "${usb_addr}" ]; then
+   wget_bind="--bind-address=${usb_addr}"
+  fi
+ fi
+ shift
+fi
+if [ $# -lt 1 ]; then
+ logger -s -t update-stage -p err 'Bad arguments'
+ firmwarestatusevent DownloadFailed 0.0.0.0 -1
+ usage
+fi
+version=$1
+# ps -o pid,ppid,pgid,comm,args | sed -e "s;^;$$? ;" | logger -s -t update-stage -p info
+if [ "${model}" == "bb" ]; then
+ cmd="update-stage --bb $*"
+ prior_update_pgids=`ps -o pid,ppid,pgid,comm,args | grep -v "\<$$\>" | grep -v "${cmd}" | sed -n -e 's;^ *[0-9][0-9]*  *[0-9][0-9]*  *\([0-9][0-9]*\) update-stage .*$;\1;p'`
+ if [ -z "${prior_update_pgids}" ]; then
+  curr_update_pgids=`ps -o pid,ppid,pgid,comm | grep -v "\<$$\>" | sed -n -e 's;^ *[0-9][0-9]*  *[0-9][0-9]*  *\([0-9][0-9]*\) update-stage$;\1;p'`
+  if [ -n "${curr_update_pgids}" ]; then
+   logger -s -t update-stage -p info ' Update is already running -${curr_update_pgids}... exit normally.'
+   exit 0
+  fi
+ fi
+else
+ prior_update_pgids=`ps -o pid,ppid,pgid,comm | grep -v "\<$$\>" | sed -n -e 's;^ *[0-9][0-9]*  *[0-9][0-9]*  *\([0-9][0-9]*\) update-stage$;\1;p'`
+fi
+for pgid in ${prior_update_pgids}; do
+ kill -TERM -${pgid} 2>/tmp/us$$-kill
+ status=$?
+ if [ ${status} -eq 0 ]; then
+  logger -s -t update-stage -p info "killed prior invocation -${pgid}"
+ else
+  if ! grep -q 'No such process' /tmp/us$$-kill; then
+   logger -s -t update-stage -p info < /tmp/us$$-kill
+   firmwarestatusevent DownloadFailed "${version}" -2
+   rm /tmp/us$$-kill
+   exit 1
+  fi
+ fi
+ rm /tmp/us$$-kill
+done
+if ! grep -qs 'mtd1:.* 00020000 "ubi"' /proc/mtd; then
+ logger -s -t update-stage -p err 'Missing UBI'
+ firmwarestatusevent DownloadFailed "${version}" -3
+ exit 1
+fi
+if [ `ip -f inet -o address | wc -l` -lt 2 ]; then
+ logger -s -t update-stage -p err 'Network not up'
+ firmwarestatusevent DownloadFailed "${version}" -4
+ exit 1
+fi
+if [ $# -ge 2 ]; then
+ sources=$2
+elif [ -s /nvdata/config/pphone.conf ]; then
+ sources=`sed -n -e '/^\[system\]/,/^\[/s/configServers=[^0-9]*\([0-9.:,]*\).*/\1/p' /nvdata/config/pphone.conf`
+fi
+if [ $# -ge 3 ]; then
+ check=/$3
+else
+ check=
+fi
+if [ -z "${sources}" ]; then
+ logger -s -t update-stage -p err 'Missing sources'
+ firmwarestatusevent DownloadFailed "${version}" -5
+ usage
+fi
+model=`cat /proc/manuf/software`
+if [ -z "${model}" ]; then
+ logger -s -t update-stage -p err 'Missing software= in boot0'
+ firmwarestatusevent DownloadFailed "${version}" -6
+ exit 1
+fi
+hwCompatibility=`cat /proc/manuf/hwCompatibility 2>/dev/null`
+hwCompatibility=${hwCompatibility:-0}
+# create match hwFailPatterns for 0..${hwCompatibility}
+hwFailPatterns=
+hwPrefix=
+hwRemainingLen=${#hwCompatibility}
+#  create matches when identical number of digits as hwCompatibility
+for d in `echo ${hwCompatibility} | sed -e 's;.;& ;g'`; do
+ if [ ${d} -ne 0 ]; then
+  # create match patterns for digits below this one
+  if [ "${hwFailPatterns}" ]; then
+   hwFailPatterns="${hwFailPatterns}|"
+  fi
+  hwFailPatterns="${hwFailPatterns}${hwPrefix}[0-$((d-1))]"
+  count=${hwRemainingLen}
+  # and any in the less significant digits
+  while [ ${count} -gt 1 ]; do
+   hwFailPatterns="${hwFailPatterns}[0-9]"
+   count=$((count-1))
+  done
+ fi
+ hwPrefix=${hwPrefix}${d}
+ hwRemainingLen=$((hwRemainingLen-1))
+done
+#  create matches when fewer number of digits than hwCompatibility
+hwRemainingLen=${#hwCompatibility}
+while [ ${hwRemainingLen} -gt 1 ]; do
+ hwRemainingLen=$((hwRemainingLen-1))
+ hwFailPatterns="${hwFailPatterns}|"
+ count=${hwRemainingLen}
+ while [ ${count} -gt 0 ]; do
+  hwFailPatterns="${hwFailPatterns}[0-9]"
+  count=$((count-1))
+ done
+done
+# create toc.txt match and reject strings
+grepToc="^${model}`echo -e '\t'`[^`echo -e '\t'`]*`echo -e '\t'`${version}`echo -e '\t'`"
+if [ -z "${hwFailPatterns}" ]; then
+ grepVToc=
+else
+ grepVToc="^${model}`echo -e '\t'`(${hwFailPatterns})`echo -e '\t'`${version}`echo -e '\t'`"
+fi
+currbank=`sed -n -e 's;.*rootfs\([01]\).*;\1;p' /proc/cmdline`
+if [ -z "${currbank}" ]; then
+ logger -s -t update-stage -p err 'Internal failure: cannot determine bank from cmdline'
+ firmwarestatusevent DownloadFailed "${version}" -7
+ exit 1
+fi
+nextbank=$((1-currbank))
+result=success
+logger -s -t update-stage -p info "Updating into bank ${nextbank}"
+for source in ${sources//,/ }; do
+ if [ "${result}" != "success" ]; then
+  # report prior failure
+  logger -s -t update-stage -p warning "${result}"
+  result=success
+ fi
+ if [ -z "${source//[0-9.:]/}" ]; then
+  # expand bald IP address into http://
+  source=http://${source}
+ fi
+ # get toc.txt
+ echo "${tocname}              from web ${source}/phones/${version}${check}/${tocname} ..."
+ rm -f /tmp/us$$-toc.txt
+ wget ${wget_bind} -O /tmp/us$$-toc.txt "${source}/phones/${version}${check}/${tocname}"
+ if ! [ -s /tmp/us$$-toc.txt ]; then
+  result="Cannot get ${source}/phones/${version}${check}/${tocname}"
+  continue
+ fi
+ # get highest appropriate-version 
+ if [ -z "${grepVToc}" ]; then
+  grep "${grepToc}" /tmp/us$$-toc.txt | sort -r -n -k 2 >/tmp/us$$-manifests
+ else
+  grep "${grepToc}" /tmp/us$$-toc.txt | grep -v -E "${grepVToc}" | sort -r -n -k 2 >/tmp/us$$-manifests
+ fi
+ # check for reasonable date
+ udate=`date +%s`
+ fdate=`date +%s -r /tmp/us$$-toc.txt`
+ if [ $udate -lt $fdate ]; then
+  date -s @$fdate
+  logger -s -t update-stage -p info "date set to `date +"%F %T"` from ${source}/phones/${version}${check}/${tocname}"
+ fi
+ if [ ! -s /tmp/us$$-manifests ]; then
+  result="Cannot find ${model} ${hwCompatibility} ${version} in ${source}/phones/${version}${check}/${tocname}"
+  continue
+ fi
+ occluding=
+ for df in /data/nvdata/.wh.__dir_opaque /data/nvdata/.wh.certs /data/nvdata/certs/.wh.__dir_opaque /data/nvdata/certs/.wh.fwca; do
+  if [ -e $df ]; then
+   occluding="$occluding $df"
+  fi
+ done
+ if [ "$occluding" ]; then
+  # work around shell user who removed files from /nvdata instead of issuing ftclean
+  logger -s -t update-stage -p warning "Removing$occluding"
+  echo -n $occluding | tr ' ' \\0 | xargs -0 rm -f
+ fi
+ while [ -s /tmp/us$$-manifests ]; do
+  if [ "${result}" != "success" ]; then
+   # report prior failure
+   logger -s -t update-stage -p warning "${result}"
+   result=success
+  fi
+  rm -f /tmp/us$$-webroot-manifest
+  head -1 /tmp/us$$-toc.txt    >/tmp/us$$-webroot-toc.txt
+  head -1 /tmp/us$$-manifests >>/tmp/us$$-webroot-toc.txt
+  file="`sed -n -e "1s;^[^\t]*\t[^\t]*\t[^\t]*\t\([^\t]*\).*;\1;p" /tmp/us$$-manifests`"
+  sha1=`sed -n -e "1s;^[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t\([^\t]*\).*;\1;p" /tmp/us$$-manifests`
+  tail -n +2 /tmp/us$$-manifests >/tmp/us$$-tmp
+  mv /tmp/us$$-tmp /tmp/us$$-manifests
+  massage_file
+  manifest="$file"
+  # get manifest
+  echo "manifest             from web ${manifest} ..."
+  wget ${wget_bind} -O - "${manifest}" >/tmp/us$$-manifest
+  if ! [ -s /tmp/us$$-manifest ]; then
+   result="Cannot get ${manifest}"
+   continue             # next manifest from /tmp/us$$-manifests, if any
+  fi
+  manifest_sha1=`cat /tmp/us$$-manifest | openssl sha1`
+  if [ "${sha1}" != "${manifest_sha1}" ]; then
+   result="sha1 in ${tocname} [${sha1}] does not match manifest [${manifest_sha1}]"
+   continue             # next manifest from /tmp/us$$-manifests, if any
+  fi
+  # ensure /dev/ubi0_n exists
+  /sbin/mdev -s 2>/dev/null
+  # create ubi number to name index (each line is number, space, name)
+  rm -f /tmp/us$$-ubi_n
+  for voln in `/usr/sbin/mtd-utils/ubinfo /dev/ubi0 | sed -n -e 's;^Present volumes: *\(.*\)$;\1;p' | tr -d ,`; do
+   /usr/sbin/mtd-utils/ubinfo /dev/ubi0_${voln} | sed -n -e "s;^Name: *\(.*\);${voln} \1;p" >>/tmp/us$$-ubi_n
+  done
+
+  if ${burnflash}; then
+   # cache existing bank volume names in update bank
+   grep "${nextbank}\$" /tmp/us$$-ubi_n >/tmp/us$$-del-next
+   # vet against new bank volume names
+   for vol in `sed -e 's;\t.*;;' /tmp/us$$-manifest`; do
+    # ctrl is a special case, it must be rewritten every time
+    if [ "${vol}" != "ctrl" ]; then
+     grep -v "\<${vol}${nextbank}\$" /tmp/us$$-del-next >/tmp/us$$-tmp
+     mv /tmp/us$$-tmp /tmp/us$$-del-next
+    fi
+   done
+
+   # abruptly terminate any downloads in progress from this phone
+   killall -q httpd update-mirror
+   # delete the phones version link
+   (cd /webroot/phones; rm -f `ls -l | sed -n -e "s;.* \([^ ]*\) -> ../bank${nextbank}\$;\1;p"`)
+   # delete the webroot contents for the bank being rewritten
+   rm -rf /webroot/bank${nextbank}
+
+   # delete unused volumes
+   for voln in `sed -n -e "s;\([0-9]*\) .*\$;\1;p" /tmp/us$$-del-next`; do
+    sed -n -e "s;^${voln} ;Deleting volume ;p" /tmp/us$$-del-next
+    /usr/sbin/mtd-utils/ubirmvol /dev/ubi0 -n ${voln}
+    status=$?
+    if [ ${status} -eq 0 ]; then
+     # remove volume from index
+     grep -v "^${voln} " /tmp/us$$-ubi_n >/tmp/us$$-tmp
+     mv /tmp/us$$-tmp /tmp/us$$-ubi_n
+    else
+     logger -s -t update-stage -p warn "Volume deletion status ${status}, but proceeding anyway"
+    fi
+   done
+  fi
+
+  # sum volume sizes
+  size_total=0
+  for vol in `sed -e 's;\t.*;;' /tmp/us$$-manifest`; do
+   size_total=$((size_total+`sed -n -e "s;^${vol}\t[^\t]*\t\([^\t]*\).*;\1;p" /tmp/us$$-manifest`))
+  done;
+  # report fraction as percent
+  size_total=$((size_total/100))
+  size_progress=0
+
+  volume_cnt=`cat /tmp/us$$-manifest | wc -l`
+  volume_num=0
+  # cycle through new bank volume names
+  for vol in `sed -e 's;\t.*;;' /tmp/us$$-manifest`; do
+   percent=$((size_progress/${size_total}))
+   [ ${percent} -lt 0 ] && percent=0
+   [ ${percent} -gt 100 ] && percent=100
+   firmwarestatusevent DownloadInProgress "${version}" ${percent}
+   echo "${percent}%"
+   volume_num=$((volume_num+1))
+   file=`sed -n -e "s;^${vol}\t\([^\t]*\).*;\1;p" /tmp/us$$-manifest`
+   size=`sed -n -e "s;^${vol}\t[^\t]*\t\([^\t]*\).*;\1;p" /tmp/us$$-manifest`
+   cert=`sed -n -e "s;^${vol}\t[^\t]*\t[^\t]*\t\([^\t]*\).*;\1;p" /tmp/us$$-manifest`
+   size_progress=$((size_progress+${size}))
+   goal_percent=$((size_progress/${size_total}))
+   [ ${goal_percent} -lt 0 ] && goal_percent=0
+   [ ${goal_percent} -gt 100 ] && goal_percent=100
+   # validate certificate part of cert
+   echo -----BEGIN CERTIFICATE-----@`echo ${cert} | sed -e 's;.*@;;'`@-----END CERTIFICATE----- | tr @ \\n |
+     sed -e 's;.................................................................;&@;g' | tr @ \\n >/tmp/us$$-certificate
+   cat /tmp/us$$-certificate | openssl verify -CApath /nvdata/certs/fwca | tr \\n ';' >/tmp/us$$-verify
+   verify_set
+   if ! ${verified}; then
+    result="Volume ${vol} certificate issuer `cat /tmp/us$$-certificate | openssl x509 -issuer_hash -noout` verify \"${verify}\", status ${status}"
+    break
+   fi
+   # extract public key from certificate
+   openssl x509 -in /tmp/us$$-certificate -pubkey -noout >/tmp/us$$-pubkey
+   # extract signature from manifest cert
+   echo ${cert} | sed -e 's;@.*;;' | base64 -d >/tmp/us$$-signature
+
+   massage_file
+
+   # collect next and current certificates from their existing manifests
+   if [ -s /etc/update/manifest${nextbank} ]; then
+    nextcert=`sed -n -e "s;^${vol}\t[^\t]*\t[^\t]*\t\([^\t]*\).*;\1;p" /etc/update/manifest${nextbank}`
+   else
+    nextcert=
+   fi
+   if [ -s /etc/update/manifest${currbank} ]; then
+    currcert=`sed -n -e "s;^${vol}\t[^\t]*\t[^\t]*\t\([^\t]*\).*;\1;p" /etc/update/manifest${currbank}`
+   else
+    currcert=
+   fi
+   if [ "${vol}" == "ctrl" ]; then
+    # make destination volume and capture volume number
+    if ${burnflash}; then
+     /usr/sbin/mtd-utils/ubimkvol /dev/ubi0 -s ${size} --name ${vol}${nextbank} -t static 2>&1 >/tmp/us$$-vol
+     voln=`sed -n -e 's;Volume ID \([0-9]*\).*;\1;p' /tmp/us$$-vol`
+    else
+     voln=`sed -n -e "s;\([0-9]*\) ${vol}${nextbank};\1;p" /tmp/us$$-ubi_n`
+    fi
+    if ! [ "${voln}" ]; then
+     if ${burnflash}; then
+      logger -s -t update-stage -p err "Failure: volume ${vol}${nextbank} size ${size} creation failed"
+      logger -s -t update-stage -p err < /tmp/us$$-vol
+      killall -q update-progress
+     else
+      logger -s -t update-stage -p err "Failure: volume ${vol}${nextbank} not found"
+     fi
+     firmwarestatusevent DownloadFailed "${version}" -$((volume_num+10))
+     rm -f /tmp/us$$-*
+     exit 1
+    fi
+    # ensure /dev/ubi0_n exists
+    /sbin/mdev -s 2>/dev/null
+    # ctrl volumes require special handling: contents don't go into FLASH yet
+    for method in ${methods}; do
+     case ${method} in
+      exists)
+       if [ "${cert}" == "${nextcert}" -a -s /etc/update/ctrl${nextbank}.original ]; then
+        if cp -f /etc/update/ctrl${nextbank}.original /tmp/us$$-ctrl; then
+         validate /tmp/us$$-ctrl
+         if ${verified}; then
+          echo 'ctrl                 already in place.'
+          break
+         else
+          logger -s -t update-stage -p info "Volume ${vol} exists but signature verify \"${verify}\", status ${status}"
+         fi
+        else
+         logger -s -t update-stage -p info "Volume ${vol} exists but copy status $?"
+        fi
+       elif ! ${burnflash}; then
+        if [ "${cert}" != "${nextcert}" ]; then
+         logger -s -t update-stage -p info "Volume ${vol} cert ${cert:0:7} != ${nextcert:0:7}"
+        else
+         logger -s -t update-stage -p info "Volume ${vol} bad missing original"
+        fi
+        break
+       fi
+       ;;
+
+      local)
+       if [ "${cert}" == "${currcert}" -a -s /etc/update/ctrl${currbank}.original ]; then
+        if cp -f /etc/update/ctrl${currbank}.original /tmp/us$$-ctrl; then
+         validate /tmp/us$$-ctrl
+         if ${verified}; then
+          echo 'ctrl                 from local copy.'
+          break
+         else
+          logger -s -t update-stage -p info "Volume ${vol} local but signature verify \"${verify}\", status ${status}"
+         fi
+        else
+         logger -s -t update-stage -p info "Volume ${vol} local but copy status $?"
+        fi
+       fi
+       ;;
+
+      remote)
+       killall -q update-progress
+       rm -f /tmp/us$$-progress
+       mkfifo /tmp/us$$-progress
+       update-progress "${version}" ${percent} ${goal_percent} /tmp/us$$-progress &
+       progress_pid=$!
+       echo "ctrl                 from web ${file} ..."
+       if wget ${wget_bind} -O - "${file}" 2>/tmp/us$$-progress >/tmp/us$$-ctrl; then
+        wait ${progress_pid}
+        validate /tmp/us$$-ctrl
+        if ${verified}; then
+         break          # success
+        else
+         result="Volume ${vol} signature verify \"${verify}\", status ${status}, abandoning manifest"
+         continue 3     # next manifest from /tmp/us$$-manifests, if any
+        fi
+       else
+        wait ${progress_pid}
+        result="Volume ${vol} wget status $?, abandoning manifest"
+        continue 3      # next manifest from /tmp/us$$-manifests, if any
+       fi
+       # control never gets here
+       ;;
+     esac
+    done
+   else
+    # non-ctrl volumes put contents into FLASH now
+    for method in ${methods}; do
+     case ${method} in
+      exists)
+       voln=`sed -n -e "s;\([0-9]*\) ${vol}${nextbank}\$;\1;p" /tmp/us$$-ubi_n`
+       if [ ! -z "${voln}" -a "${cert}" == "${nextcert}" ]; then
+        validate /dev/ubi0_${voln}
+        if ${verified}; then
+         echo "${vol}                    " | sed -e 's;\(....................\).*;\1 already in place...;'
+         break
+        else
+         logger -s -t update-stage -p info "Volume ${vol} exists but verify \"${verify}\", status ${status}"
+        fi
+       elif ! ${burnflash}; then
+        if [ "${cert}" != "${nextcert}" ]; then
+         logger -s -t update-stage -p info "Volume ${vol} cert ${cert:0:7} != ${nextcert:0:7}"
+        else
+         logger -s -t update-stage -p info "Volume ${vol} bad missing original"
+        fi
+        break
+       fi
+       ;;
+
+      local)
+       volc=`sed -n -e "s;\([0-9]*\) ${vol}${currbank};\1;p" /tmp/us$$-ubi_n`
+       if [ ! -z "${volc}" -a "${cert}" == "${currcert}" -a -e /dev/ubi0_${volc} ]; then
+        echo "${vol}                    " | sed -e 's;\(....................\).*;\1 trying local copy...;'
+        if /usr/sbin/mtd-utils/ubiupdatevol /dev/ubi0_${voln} /dev/ubi0_${volc} -s ${size}; then
+         validate /dev/ubi0_${voln}
+         if ${verified}; then
+          break
+         else
+          logger -s -t update-stage -p info "Volume ${vol} local but verify \"${verify}\", status ${status}"
+         fi
+        else
+         logger -s -t update-stage -p info "Volume ${vol} local but ubiupdatevol status $?"
+        fi
+       else
+        # no attempt :: no need to recreate voln
+        continue
+       fi
+       ;;
+
+      remote)
+       # get volume from web
+       killall -q update-progress
+       rm -f /tmp/us$$-progress
+       mkfifo /tmp/us$$-progress
+       update-progress "${version}" ${percent} ${goal_percent} /tmp/us$$-progress &
+       progress_pid=$!
+       echo "${vol}                    " | sed -e "s;\(....................\).*;\1 from web ${file//&/\\&} ...;"
+       if wget ${wget_bind} -O - "${file}" 2>/tmp/us$$-progress | /usr/sbin/mtd-utils/ubiupdatevol /dev/ubi0_${voln} - -s ${size}; then
+        wait ${progress_pid}
+        validate /dev/ubi0_${voln}
+        if ${verified}; then
+         break
+        else
+         # if here then final failure for this source
+         result="Volume ${vol} signature verify \"${verify}\", status ${status}, abandoning manifest"
+         continue 3       # next manifest from /tmp/us$$-manifests, if any
+        fi
+       else
+        wait ${progress_pid}
+        # if here then final failure for this source
+        result="Volume ${vol} wget or ubiupdatevol status $?, abandoning manifest"
+        continue 3       # next manifest from /tmp/us$$-manifests, if any
+       fi
+       # control never gets here
+       ;;
+     esac
+
+     # only get here after two cases: exists && ! burnflash, and local (if it was attempted)
+     if [ ! -z "${voln}" ]; then
+      # delete obsolete volume
+      /usr/sbin/mtd-utils/ubirmvol /dev/ubi0 -n ${voln}
+      status=$?
+      if [ ${status} -eq 0 ]; then
+       # remove volume from index
+       grep -v "^${voln} " /tmp/us$$-ubi_n >/tmp/us$$-tmp
+       mv /tmp/us$$-tmp /tmp/us$$-ubi_n
+      else
+       logger -s -t update-stage -p warn "Volume deletion status ${status}, but proceeding anyway"
+      fi
+     fi
+
+     # make destination volume and capture volume number
+     /usr/sbin/mtd-utils/ubimkvol /dev/ubi0 -s ${size} --name ${vol}${nextbank} -t static 2>&1 >/tmp/us$$-vol
+     voln=`sed -n -e 's;Volume ID \([0-9]*\).*;\1;p' /tmp/us$$-vol`
+     if ! [ "${voln}" ]; then
+      logger -s -t update-stage -p err "Failure: volume ${vol}${nextbank} size ${size} creation failed"
+      logger -s -t update-stage -p err < /tmp/us$$-vol
+      firmwarestatusevent DownloadFailed "${version}" -$((volume_num+10))
+      killall -q update-progress
+      rm -f /tmp/us$$-*
+      exit 1
+     fi
+     # ensure /dev/ubi0_n exists
+     /sbin/mdev -s 2>/dev/null
+    done
+   fi
+
+   # beyond ctrl vs. other special cases
+   logger -s -t update-stage -p info "Volume ${volume_num}/${volume_cnt} ${vol}${nextbank} handled"
+  done
+  # done with all manifests, success or not
+  if ${burnflash} && [ "${result}" == "success" ]; then
+   mv /tmp/us$$-manifest /etc/update/manifest${nextbank}
+   mv /tmp/us$$-ctrl /etc/update/ctrl${nextbank}.original
+   echo "${version}" >/etc/update/version${nextbank}
+   # rebuild the /webroot
+   mkdir -p /webroot/bank${nextbank}
+   ctrlfile=`sed -n -e "s;^ctrl\t\([^\t]*\)\t.*;\1;p" /tmp/us$$-webroot-manifest`
+   ln -f -s /etc/update/ctrl${nextbank}.original /webroot/bank${nextbank}/${ctrlfile}
+   manifest=`sed -n -e "2s;^[^\t]*\t[^\t]*\t[^\t]*\t\([^\t]*\).*;\1;p" /tmp/us$$-webroot-toc.txt`
+   cp -f /tmp/us$$-webroot-manifest /webroot/bank${nextbank}/${manifest##*/}
+   # re-sha1 the manifest for the toc
+   manifest_sha1=`cat /tmp/us$$-webroot-manifest | openssl sha1`
+   sed -e "2s;\(^[^\t]*\t[^\t]*\t[^\t]*\t\)[^\t]*\t[^\t]*\(.*\);\1${manifest##*/}\t${manifest_sha1}\2;" /tmp/us$$-webroot-toc.txt >/webroot/bank${nextbank}/${tocname}
+   (cd /webroot/phones; rm -f "${version}"; ln -s ../bank${nextbank} "${version}")
+   break 2
+  fi
+ done
+ if [ "${result}" != "success" ]; then
+  result="${result}, abandoning source ${source}"
+ fi
+ # done with all sources, success or not
+done
+
+killall -q update-progress
+rm -f /tmp/us$$-*
+if [ "${result}" == "success" ]; then
+ logger -s -t update-stage -p info 'Success'
+ firmwarestatusevent DownloadReady "${version}" 100
+ echo "100%"
+ exit 0
+fi
+firmwarestatusevent DownloadFailed "${version}" 0
+logger -s -t update-stage -p err "${result}; nothing further to attempt"
+exit 1

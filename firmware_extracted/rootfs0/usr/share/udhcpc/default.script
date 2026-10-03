@@ -1,0 +1,138 @@
+#!/bin/ash
+[ -z "$1" ] && echo "Error: should be called from udhcpc" && exit 1
+
+logger -s -t udhcpc:default.script -p info "$1 interface $interface $dns $dns ip $ip subnet $subnet router $router option156 $option156 tftp $tftp"
+case "$1" in
+ deconfig)
+  /sbin/ifconfig $interface 0.0.0.0
+  ;;
+
+ timeout)
+  # dhcpc runs on usb0 only on button box
+  if [ "$interface" = "usb0" ]; then
+   touch /tmp/dhcp_attempts
+   n=`cat /tmp/dhcp_attempts`
+   if [ -z "$n" ]; then
+     n="0"
+   fi
+
+   # if lease has been lost previously (n value is "1"), 
+   # it's likely to be a primary button box
+   # reporting lease lost on phone reboot.
+   if [ "$n" = "1" ]; then
+    # bring up brutal force...On phone reboot primary button box
+    # gets stuck trying to do dhcp discover. The only way to get out
+    # of this state is to restart USBNET modules
+    echo "0" > /tmp/dhcp_attempts
+    echo "restarting USBNET"
+    /etc/init.d/usbnet stop
+    /etc/init.d/usbnet start 5 &
+    exit 1
+   else
+    # we dont'have control over timeout and retry number parameters
+    # to speed up dhcp lease acquiring we kill and restart udhcpc
+    p=`pidof udhcpc`
+    /usr/sbin/udhcpc -b -i $interface -s /usr/share/udhcpc/default.script &
+    kill -9 $p &
+    echo "1" > /tmp/dhcp_attempts
+   fi
+  fi
+  ;;
+
+lost)
+  # dhcpc runs on usb0 only on button box
+  if [ "$interface" = "usb0" ]; then
+    # report lease lost event
+    touch /tmp/dhcp_attempts
+    echo "1" > /tmp/dhcp_attempts
+  fi
+  ;;
+
+ renew|bound)
+  # dhcpc runs on usb0 only on button box
+  if [ "$interface" = "usb0" ]; then
+   # clear lease lost event flag
+   touch /tmp/dhcp_attempts
+   echo "0" > /tmp/dhcp_attempts
+  fi
+ 
+  if [ "$option156" ]; then
+   ftpservers=`echo $option156 | tr A-Z a-z | sed -n -e 's;.*ftpservers=\([^a-z]*\).*;\1;p' | sed -e 's;[^0-9.]; ;g'`
+   option156valid=true
+  else
+   ftpservers=
+   option156valid=false
+  fi
+  # write netcache
+  echo >  /nvdata/netcache.new "[General]"
+  echo >> /nvdata/netcache.new "lease.dns=$dns"
+  echo >> /nvdata/netcache.new "lease.ipAddress=$ip"
+  echo >> /nvdata/netcache.new "lease.ntpServer=$ntpsrv"
+  echo >> /nvdata/netcache.new "lease.tftp=$tftp"
+  echo >> /nvdata/netcache.new "lease.option156.configServers="
+  echo >> /nvdata/netcache.new "lease.option156.ftpServers=$ftpservers"
+  echo >> /nvdata/netcache.new "lease.option156.tagged=false"
+  echo >> /nvdata/netcache.new "lease.option156.valid=$option156valid"
+  echo >> /nvdata/netcache.new "lease.option156.vlanId=-1"
+  echo >> /nvdata/netcache.new "lease.router=$router"
+  echo >> /nvdata/netcache.new "lease.serverId=$serverid"
+  echo >> /nvdata/netcache.new "lease.subnetMask=$subnet"
+  echo >> /nvdata/netcache.new "lease.valid=true"
+  echo >> /nvdata/netcache.new "lease.xid=$xid"
+  echo >> /nvdata/netcache.new "policy.dscp=0"
+  echo >> /nvdata/netcache.new "policy.dscpSignaling=0"
+  echo >> /nvdata/netcache.new "policy.priority=0"
+  echo >> /nvdata/netcache.new "policy.tagged=false"
+  echo >> /nvdata/netcache.new "policy.unknown=false"
+  echo >> /nvdata/netcache.new "policy.vlanId=0"
+  mv /nvdata/netcache.new /nvdata/netcache
+
+  [ -n "$broadcast" ] && BROADCAST="broadcast $broadcast"
+  [ -n "$subnet" ] && NETMASK="netmask $subnet"
+  /sbin/ifconfig $interface $ip $BROADCAST $NETMASK
+
+  if [ -n "$router" ] ; then
+   echo "deleting routers"
+   while route del default gw 0.0.0.0 dev $interface 2> /dev/null ; do :; done
+
+   metric=0
+   for i in $router ; do
+    route add default gw $i dev $interface metric $((metric++))
+   done
+  fi
+
+  echo -n > /etc/resolv.conf
+  [ -n "$domain" ] && echo search $domain >> /etc/resolv.conf
+  for i in $dns ; do
+   echo nameserver $i >> /etc/resolv.conf
+  done
+
+  if [ "$ntpsrv" ]; then
+   ntpclient -h $ntpsrv -s -t
+   touch /nvdata/netcache /etc/resolv.conf
+  fi
+
+  # dhcpc runs on usb0 only on button box
+  # lldpctl does not provide an option to tell lldpd to update info about device
+  # killing and restarting lldpd makes device info update happenning right away
+  # need to do it only on "bound" event
+  if [ "$1" = "bound" ]; then
+   if [ "$interface" = "usb0" ]; then
+    model=`sed -n -e 's;\(.*\);\1;p' /proc/manuf/model`
+    firmware=`sed -n -e 's;[^#]*#\([0-9.a-zA-Z]*\).*;\1;p' /proc/version`
+    software=`sed -n -e 's;\([^ ][0-9.a-zA-Z]\+\).*;\1;p' /etc/issue`
+    rev=`sed -n -e 's;\([0-9]\+\).*;\1;p' /proc/manuf/hwCompatibility`
+    desc="ShoreTel $model Kernel Version: $firmware Software Version: $software HW Revision: $rev"
+
+    killall lldpd
+    rm -f /var/run/lldpd.*
+    /usr/sbin/lldpd -S "$desc" &
+   fi
+  fi
+  ;;
+
+ *)
+  ;;
+esac
+
+exit 0

@@ -1,0 +1,2 @@
+export TZ=`cat /etc/TZ 2>/dev/null`
+export ALSA_CONFIG_PATH=/etc/alsa/alsa.conf

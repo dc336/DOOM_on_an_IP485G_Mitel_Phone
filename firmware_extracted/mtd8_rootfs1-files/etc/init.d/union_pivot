@@ -1,0 +1,67 @@
+#!/bin/ash
+#
+# pivot_root to union of read-only(/rootfs,/app_lib,/phone) squashfs and read-write(/data) ubifs
+#
+# uses ${bootbank}, ${ctrlmntn}, & ${partitions} from invoker, if available
+
+case "$1" in
+ start|"")
+  if ! mount -f | grep -q -s 'ubi0:data on /data type ubifs (rw)'; then
+   echo "Missing /data, abandoning union_pivot"
+   return 1
+  fi
+  if ! mount --bind / /rootfs; then
+   echo "Cannot rebind /rootfs, abandoning union_pivot"
+   return 1
+  fi
+  # from invoker, if available...
+  [ "${bootbank}" ] || bootbank=`sed -e 's;.*(rootfs\(.\)).*;\1;' /proc/cmdline`
+  [ "${ctrlmtdn}" ] || ctrlmtdn=`sed -n -e "s;mtd\([0-9]*\):.*\"ctrl${bootbank}\";\1;p" /proc/mtd`
+  [ "${partitions}" ] || partitions=`sed -n -e '8p' /dev/mtd${ctrlmtdn}`
+  partitions_except_rootfs=`echo ${partitions} | sed -e 's; *\<rootfs\> *; ;'`
+  for mount in ${partitions_except_rootfs}; do
+   mtdnum=`sed -n -e "s;^mtd\([^:]*\):.*\"${mount}${bootbank}\".*;\1;p" /proc/mtd`
+   if [ "$mtdnum" ]; then
+    mkdir -p /data/${mount}
+    mount -t squashfs /dev/mtdblock$mtdnum /data/${mount}
+    if [ $? -ne 0 ]; then
+     echo "Cannot mount ${mount} -- it will not be in unionfs!"
+     partitions=`echo ${partitions} | sed -e "s; *\<${mount}\> *; ;"`
+    fi
+   else
+    echo "Cannot find \"${mount}${bootbank}\" -- it was here a second ago!"
+    partitions=`echo ${partitions} | sed -e "s; *\<${mount}\> *; ;"`
+   fi
+  done
+  # add mounted partitions to union_dirs
+  union_dirs=/data=rw:`echo ${partitions} | tr ' ' \\\n | sed -e 's;.*;/data/&=ro;' | tr \\\n : | sed -e 's;/data/rootfs=;/rootfs=;' -e 's;:$;;'`
+  mount -t unionfs -o dirs=$union_dirs unionfs /union
+  if [ $? = 0 ]; then
+   /sbin/pivot_root /union /union/rootfs
+   mount -t proc proc /proc
+   if [ -e /rootfs/proc ]; then
+    umount /rootfs/proc
+   fi
+   if [ -e /rootfs/dev/shm ]; then
+    mount --move /rootfs/dev/shm /dev/shm
+   fi
+   mount --move /rootfs/data /data
+   for mount in ${partitions_except_rootfs}; do
+    mount --move /data/${mount} /${mount}
+   done
+   umount -l /rootfs/rootfs
+  fi
+  mount -a
+  echo unionfs $union_dirs
+  ;;
+
+ stop)
+  # don't try to umount after pivot_root
+  ;;
+
+ *)
+  echo "Usage $0 {start|stop}" >&2
+  exit 1
+  ;;
+
+esac
